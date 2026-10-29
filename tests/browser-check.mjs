@@ -140,17 +140,34 @@ await check("all five acts and four transitions render at fixed film timestamps"
   const moments = [
     [0, "act1", null, "film_00_opening_dark"],
     [12, "act1", null, "film_12_waiting"],
+    [23.999, "act1", null, "film_23_999_before_bloom"],
     [24, "act2", "bloom", "film_24_bloom_start"],
     [26, "act2", "bloom", "film_26_bloom_midpoint"],
+    [27.999, "act2", "bloom", "film_27_999_before_bloom_end"],
+    [28, "act2", null, "film_28_after_bloom"],
+    [28.001, "act2", null, "film_28_001_after_bloom"],
     [40, "act2", null, "film_40_cathedral"],
+    [53.999, "act2", null, "film_53_999_before_fog"],
     [54, "act3", "fog", "film_54_fog_start"],
     [56, "act3", "fog", "film_56_fog_midpoint"],
+    [57.999, "act3", "fog", "film_57_999_before_fog_end"],
+    [58, "act3", null, "film_58_after_fog"],
+    [58.001, "act3", null, "film_58_001_after_fog"],
     [70, "act3", null, "film_70_terrace"],
+    [84.799, "act3", null, "film_84_799_before_dark"],
     [84.8, "act4", "dark", "film_84_8_dark_start"],
     [86.4, "act4", "dark", "film_86_4_dark_midpoint"],
+    [87.999, "act4", "dark", "film_87_999_before_dark_end"],
+    [88, "act4", null, "film_88_after_dark"],
+    [88.001, "act4", null, "film_88_001_after_dark"],
     [96, "act4", null, "film_96_storm_rising"],
     [112, "act4", null, "film_112_oath_climax"],
+    [116.799, "act4", null, "film_116_799_before_continue"],
     [116.8, "act5", "continue", "film_116_8_shared_storm"],
+    [118.8, "act5", "continue", "film_118_8_shared_storm_midpoint"],
+    [120.799, "act5", "continue", "film_120_799_before_continue_end"],
+    [120.8, "act5", null, "film_120_8_after_continue"],
+    [120.801, "act5", null, "film_120_801_after_continue"],
     [140, "act5", null, "film_140_quiet"],
     [149, "act5", null, "film_149_final_verse"],
     [152.4, "act5", null, "film_152_4_final_title"],
@@ -190,7 +207,29 @@ await check("all five acts and four transitions render at fixed film timestamps"
       let h = 2166136261; for (const v of px) h = Math.imul(h ^ v, 16777619); return h >>> 0; })()`);
     assert.equal(b, a, `same timestamp gives identical pixels at t=${t}`);
   }
-  note(`${moments.length} stills saved in tests/shots/, covering every act, all four handoffs, and the ending fade.`);
+  note(`${moments.length} stills saved in tests/shots/, including before, inside, and after every handoff.`);
+
+  await page.goto(`${INDEX}?debug=1&t=0`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  const layouts = [[1280, 720, 1, 12, "act1"], [800, 450, .5, 40, "act2"], [520, 800, .75, 70, "act3"],
+    [1280, 720, .5, 112, "act4"], [800, 450, .75, 140, "act5"]];
+  for (const [w, h, scale, t, scene] of layouts) {
+    await page.resize(w, h, 1);
+    await sleep(150);
+    const r = await page.eval(`(() => {
+      const e = window.__eternal; e.setScale(${scale}); const f = e.seek(${t}), c = document.getElementById('c'), gl = e.renderer.gl;
+      const px = new Uint8Array(c.width * c.height * 4); gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let sum = 0, count = 0; for (let i = 0; i < px.length; i += 64) { sum += px[i] + px[i + 1] + px[i + 2]; count += 3; }
+      const box = c.getBoundingClientRect(); return JSON.stringify({ scene: f.sceneId, mean: sum / count, scale: e.renderer.scale,
+        box: [box.width, box.height], ratio: box.width / box.height, errors: e.renderer.drainErrors() });
+    })()`).then(JSON.parse);
+    assert.equal(r.scene, scene, `scene at t=${t} in ${w}x${h}`);
+    assert.equal(r.scale, scale, `render scale in ${w}x${h}`);
+    assert.ok(r.mean > 1, `blank scene at t=${t}: mean ${r.mean}`);
+    assert.ok(Math.abs(r.ratio - 2.39) < .02, `frame aspect at ${w}x${h}: ${r.ratio}`);
+    assert.deepEqual(r.errors, [], `WebGL errors at t=${t}, ${w}x${h}`);
+  }
+  note("All five act shaders rendered across landscape/portrait viewports and manual render scales.");
 });
 
 // ---------------------------------------------------------------- 5. ?bench
