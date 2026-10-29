@@ -198,6 +198,8 @@ await check("all five acts and four transitions render at fixed film timestamps"
     writeFileSync(join(SHOTS, `${name}_960x540.png`), await page.screenshot());
   }
   assert.ok(seen.get(149).mean > seen.get(154.8).mean, "the ending fades toward black");
+  assert.ok(seen.get(26).mean < 90, `Act I→II bloom midpoint remains too pale: mean ${seen.get(26).mean}`);
+  note(`Act I→II bloom midpoint mean brightness: ${seen.get(26).mean.toFixed(1)} / 255`);
 
   // A different sequence of seeks must not alter the picture at any sampled instant.
   for (const t of [26, 40, 56, 70, 86.4, 96, 112, 116.8, 140, 149, 152.4, 154.8]) {

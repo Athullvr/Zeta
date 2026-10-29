@@ -463,10 +463,13 @@ void main() {
       wb = smoothstep(n - .16, n + .16, uMix * 1.32 - .16);
       wa = 1. - wb;
       add = vec3(.20, .25, .36) * pow(1. - abs(2. * uMix - 1.), 2.) * (.10 + .22 * vn(uv * 4. + uTime * .05));
-    } else if (uTrans < 2.5) {                // 2: bloom. The light swells until it is all there is, and the next scene is lit by it.
+    } else if (uTrans < 2.5) {                // 2: bloom. A focused silver-blue flare bridges the castle window into the cathedral light.
       wb = smoothstep(.40, .60, uMix);
       wa = 1. - wb;
-      add = vec3(.62, .70, .92) * exp(-pow((uMix - .5) * 3.4, 2.)) * (1.15 - .5 * length(uv - .5));
+      float radius = length((uv - .5) * vec2(1.25, 1.));
+      float pulse = exp(-pow((uMix - .5) * 3.4, 2.));
+      float focus = .42 + .58 * exp(-radius * 2.);
+      add = vec3(.22, .28, .45) * pulse * (1.02 - .32 * radius) * focus;
     } else {                                  // 3: darkness. Fade to black, then up from black.
       wa = 1. - smoothstep(0., .5, uMix);
       wb = smoothstep(.5, 1., uMix);
