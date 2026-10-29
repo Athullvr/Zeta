@@ -81,13 +81,14 @@
   addEventListener("pointerdown", () => { if (replayShown && fixedT === null) restart(); });
 
   // ---------- debugging hooks ----------
-  if (Q.has("debug") || Q.has("bench")) {
+  if (Q.has("debug") || Q.has("bench") || Q.has("probe")) {
     const avgFps = () => { const d = perf.dts; return d.length ? Math.round(1000 / (d.reduce((a, b) => a + b, 0) / d.length)) : 0; };
     window.__eternal = {
       info: renderer.info, director, clock, avgFps,
       seek(t) { clock.seek(t); paused = true; cancelAnimationFrame(rafId); return draw(); },
       // time n back-to-back frames across the film, synced to the GPU; returns ms per frame
       bench(n = 30) {
+        renderer.render(director.frameAt(0, opts)); renderer.finish();   // warm up
         const t0 = performance.now();
         for (let i = 0; i < n; i++) { renderer.render(director.frameAt(i / n * director.duration, opts)); }
         renderer.finish();
@@ -98,8 +99,43 @@
   if (Q.has("bench")) {
     cancelAnimationFrame(rafId); paused = true;
     const ms = window.__eternal.bench(12);
+    report({ msPerFrame: +ms.toFixed(2), info: renderer.info() });
+  }
+
+  function report(obj) {
     const r = document.createElement("pre");
-    r.id = "report"; r.textContent = JSON.stringify({ msPerFrame: +ms.toFixed(2), info: renderer.info() });
+    r.id = "report"; r.textContent = JSON.stringify(obj);
     document.body.appendChild(r);
+    document.documentElement.dataset.reported = "1";
+    console.log("ETERNAL_REPORT " + r.textContent);
+  }
+
+  // ?probe: render with the camera pinned at two moments and measure how much each region of the picture changes,
+  // so animation of the moon, clouds, mist and castle is measured separately from the camera push-in.
+  if (Q.has("probe")) {
+    cancelAnimationFrame(rafId); paused = true;
+    const gl = renderer.gl, W = canvas.width, H = canvas.height;
+    const REGIONS = { moon: [.60, .30, .70, .45], clouds: [.08, .12, .30, .30], mist: [.20, .78, .50, .86], castle: [.45, .38, .62, .62], sky: [.80, .10, .95, .25] };
+    const grab = (t, over) => {
+      const f = director.frameAt(t, opts);
+      Object.assign(f.uniforms, { uCam: [0, 0, 1.1, 0], uGrain: 0 }, over || {});
+      renderer.render(f);
+      const px = new Uint8Array(W * H * 4);
+      gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      return px;
+    };
+    const region = ([x0, y0, x1, y1]) => { const out = []; for (let y = Math.floor((1 - y1) * H); y < Math.floor((1 - y0) * H); y += 2) for (let x = Math.floor(x0 * W); x < Math.floor(x1 * W); x += 2) { const i = (y * W + x) * 4; out.push(i); } return out; };
+    const diff = (a, b, idx) => { let d = 0; for (const i of idx) d += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]); return +(d / idx.length / 3).toFixed(3); };
+    const mean = (a, idx) => { let d = 0; for (const i of idx) d += (a[i] + a[i + 1] + a[i + 2]) / 3; return +(d / idx.length).toFixed(2); };
+    const out = { size: [W, H], renderer: renderer.info().renderer, floatTarget: renderer.info().floatTarget, moments: {} };
+    for (const t0 of [5, 8, 12]) {
+      const a = grab(t0), a2 = grab(t0), b = grab(t0 + .6), c3 = grab(t0 + 3);
+      const m = { identicalRerender: a.every((v, i) => v === a2[i]), change: {}, change3s: {}, brightness: {} };
+      for (const [k, r] of Object.entries(REGIONS)) { const idx = region(r); m.change[k] = diff(a, b, idx); m.change3s[k] = diff(a, c3, idx); m.brightness[k] = mean(a, idx); }
+      out.moments[t0] = m;
+    }
+    // whole-film frame energy, to be sure no moment is blank or blown out
+    out.timeline = [0, 1, 2, 3, 5, 7, 9, 11, 13, 14.5].map(t => { const p = grab(t, {}); const idx = region([0, 0, 1, 1]); return [t, mean(p, idx)]; });
+    report(out);
   }
 })();

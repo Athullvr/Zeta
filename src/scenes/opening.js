@@ -27,7 +27,7 @@
   // Uniform contract (see UNIFORMS in shaders.js): camera, scene and post values for scene-local time t.
   function uniforms(t, opts = {}) {
     const reduced = !!opts.reduced;            // prefers-reduced-motion: gentler camera, quieter lightning
-    const push = reduced ? .12 : .26;
+    const push = reduced ? .10 : .20;
     const run = seg(t, 0, DURATION);
 
     let flash = 0, flashX = STRIKES[0].x;
@@ -44,7 +44,7 @@
       // scene
       uLight: .3 * smooth(seg(t, .3, 3.2)) + .7 * smooth(seg(t, 3, 9)),     // a little silver first, then the night opens
       uMoon: smoother(seg(t, 1.8, 6)),                                      // the disc emerges from behind the clouds
-      uCloud: lerp(1, .5, smooth(seg(t, 1.2, 9))),                          // overcast thins as the moon rises
+      uCloud: lerp(1, .20, smooth(seg(t, 1.2, 9))),                          // overcast thins as the moon rises
       uStars: smooth(seg(t, 3.5, 8.5)),
       uCastle: smoother(seg(t, 3.6, 7.6)),                                  // silhouette rises out of the mist
       uWindows: smoother(seg(t, 6.2, 11.5)),                                // windows kindle one by one

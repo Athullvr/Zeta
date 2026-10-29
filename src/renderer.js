@@ -140,7 +140,8 @@
       const ext = gl.getExtension("WEBGL_debug_renderer_info");
       return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
     }
-    function finish() { gl.finish(); }
+    const sink = new Uint8Array(4);
+    function finish() { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, sink); }   // gl.finish() does not block in Chrome; a read-back does
 
     canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); if (options.onContextLost) options.onContextLost(); });
     return { resize, render, info, finish, gl };

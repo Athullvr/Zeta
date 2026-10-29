@@ -19,17 +19,17 @@ body { display: grid; place-items: center; }
 .cue[hidden] { display: none; }
 .ch, .wd { display: inline-block; will-change: opacity, filter, transform; opacity: 0; }
 
-.title { top: 61%; }
+.title { top: 63%; }
 .title-word {
-  --ls: .3em; font-size: 6.4cqw; font-weight: 400; line-height: 1; letter-spacing: var(--ls); padding-left: var(--ls); white-space: nowrap;
+  --ls: .3em; font-size: 5.6cqw; font-weight: 400; line-height: 1; letter-spacing: var(--ls); padding-left: var(--ls); white-space: nowrap;
   color: #eef2fa; text-shadow: 0 0 .35em rgba(170, 190, 230, .45), 0 .02em .5em rgba(0, 0, 0, .7);
 }
 .title-rule {
-  width: 22cqw; height: 1px; margin: 2.2cqw auto 0; transform-origin: center; transform: scaleX(0);
+  width: 22cqw; height: 1px; margin: 1.6cqw auto 0; transform-origin: center; transform: scaleX(0);
   background: linear-gradient(90deg, transparent, var(--gold) 20%, #e0c98f 50%, var(--gold) 80%, transparent);
 }
 
-.poem { top: 80%; font-style: italic; font-size: 2.15cqw; line-height: 1.55; color: var(--silver); text-shadow: 0 0 .8em rgba(0, 0, 0, .9), 0 0 .3em rgba(0, 0, 0, .8); }
+.poem { top: 81%; font-style: italic; font-size: max(2cqw, 11px); line-height: 1.55; color: var(--silver); text-shadow: 0 0 .8em rgba(0, 0, 0, .9), 0 0 .3em rgba(0, 0, 0, .8); }
 .poem-line { white-space: nowrap; }
 
 #hint {
