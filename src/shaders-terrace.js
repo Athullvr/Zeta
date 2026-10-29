@@ -23,7 +23,7 @@ ${C.SKY}
 const vec2 MOON_C = vec2(.30, .17);
 const float MOON_R = .20;
 const vec3 SILVER = vec3(.74, .80, .92);
-const vec3 PETAL = vec3(.30, .05, .09);
+const vec3 PETAL = vec3(.20, .035, .06);
 const float S_ARCH = .62;                 // spacing of the arcade's piers
 vec2 gQ;
 
@@ -216,8 +216,8 @@ void main() {
   col = mix(col, mistColor(pa), mistBand(pa, -.27, .05, .04, 17.) * uMist * .55);
 
   // petals in the middle distance
-  col += petals(pg, 14., 3., .05, .24, .30) * uPetals * .5 * smoothstep(-.3, .0, pg.y);
-  col += petals(pa, 8., 11., .09, .26, .26) * uPetals * .6;
+  col += petals(pg, 14., 3., .05, .24, .17) * uPetals * .35 * smoothstep(-.3, .0, pg.y);
+  col += petals(pa, 8., 11., .09, .26, .12) * uPetals * .40;
 
   // the balustrade in front: a worn rail on little pointed arches, and thorn vines hanging from above
   vec2 pb = layerP(1.25);
@@ -238,7 +238,7 @@ void main() {
   col = mix(col, vec3(.003, .005, .012), vines);
 
   // petals in front, soft and large; a mist that moves faster than anything else
-  col += petals(pv, 4., 23., .13, .28, .16) * uPetals * .7;
+  col += petals(pv, 4., 23., .13, .28, .08) * uPetals * .45;
   col = mix(col, mistColor(pb) * .8, mistBand(pb, -.40, .08, .07, 29.) * uMist * .5);
 
   fragColor = vec4(col, 1.);

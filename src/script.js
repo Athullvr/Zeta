@@ -35,10 +35,10 @@
 
     // IV. The oath: forceful, and the cost of it. Times are local to act IV; act V takes over the same sky at 32 s.
     act4: [
-      { id: "a4.centuries", kind: "poem", lines: ["Let the centuries come.", "Let them break on these walls like weather."], place: "low", in: [3.4, 5.8], out: [10.2, 11.4] },
-      { id: "a4.winter", kind: "poem", lines: ["I will wait through every winter.", "I will outlast the dark itself."], place: "low", in: [14.0, 16.4], out: [20.4, 21.6] },
-      { id: "a4.price", kind: "poem", lines: ["This is the price of never ending:", "to stay when everything leaves."], place: "low", in: [23.2, 26.0], out: [29.0, 30.2] },
-      { id: "a4.gladly", kind: "poem", lines: ["I pay it gladly."], place: "low", in: [31.4, 33.2], out: [34.4, 35.6] },
+      { id: "a4.centuries", kind: "poem", lines: ["Let the centuries come.", "Let them break on these walls like weather."], place: "high", in: [3.4, 5.8], out: [10.2, 11.4] },
+      { id: "a4.winter", kind: "poem", lines: ["I will wait through every winter.", "I will outlast the dark itself."], place: "high", in: [14.0, 16.4], out: [20.4, 21.6] },
+      { id: "a4.price", kind: "poem", lines: ["This is the price of never ending:", "to stay when everything leaves."], place: "high", in: [23.2, 26.0], out: [29.0, 30.2] },
+      { id: "a4.gladly", kind: "poem", lines: ["I pay it gladly."], place: "high", in: [31.4, 33.2], out: [34.4, 35.6] },
     ],
 
     // V. Until eternity: quiet, no happy ending, only a wait that has become the love

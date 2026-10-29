@@ -34,13 +34,6 @@ body { display: grid; place-items: center; }
 .poem { font-style: italic; font-size: max(2cqw, 11px); line-height: 1.55; color: var(--silver); text-shadow: 0 0 .8em rgba(0, 0, 0, .9), 0 0 .3em rgba(0, 0, 0, .8); }
 .poem-line { white-space: nowrap; }
 
-#hint {
-  position: absolute; bottom: 4%; left: 0; right: 0; margin: 0; text-align: center; font-style: italic;
-  font-size: 1.5cqw; color: rgba(195, 205, 224, .55); letter-spacing: .08em; animation: hintIn 1.6s ease both;
-}
-#hint[hidden] { display: none; }
-@keyframes hintIn { from { opacity: 0; } to { opacity: 1; } }
-
 #fail {
   position: fixed; inset: 0; display: grid; align-content: center; justify-items: center; gap: 1rem; padding: 2rem; text-align: center;
   background: #05070d; font-family: var(--serif);
@@ -55,8 +48,6 @@ body { display: grid; place-items: center; }
 #fail pre:empty { display: none; }
 .failed #frame { display: none; }
 .noscript { padding: 2rem; text-align: center; }
-
-@media (prefers-reduced-motion: reduce) { #hint { animation: none; } }
 
 /* ?bench: a plain readable report over the picture */
 #benchPanel { position: fixed; inset: 1rem; z-index: 5; margin: 0; padding: 1rem 1.2rem; overflow: auto; white-space: pre-wrap; background: rgba(4, 6, 12, .92);

@@ -62,7 +62,7 @@
       if (bad) continue;
       const locs = {};
       for (const [u, type] of Object.entries(SH.PROGRAM_UNIFORMS[name])) locs[u] = { loc: gl.getUniformLocation(p.prog, u), type };
-      programs[name] = { prog: p.prog, locs };
+      programs[name] = { prog: p.prog, locs, uniforms: Object.entries(locs) };
     }
     const compileMs = (typeof performance !== "undefined" ? performance.now() : 0) - compileStart;
     if (problems.length) throw new EternalError("shader-compile", "A shader failed to compile.", problems.join("\n\n"));
@@ -129,7 +129,8 @@
     // Uniform setting without per-frame allocation: values come from up to three sources, first one that has the name wins.
     const warned = new Set(), dyn = { uRes: [0, 0], uTime: 0, uMix: 0, uTrans: 0 };
     function apply(name, a, b) {
-      for (const [u, { loc, type }] of Object.entries(programs[name].locs)) {
+      for (const [u, slot] of programs[name].uniforms) {
+        const { loc, type } = slot;
         let v = dyn[u];
         if (v === undefined) v = a[u];
         if (v === undefined && b) v = b[u];

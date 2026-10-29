@@ -34,9 +34,9 @@ await page.resize(960, 540);
 await page.goto(`${INDEX}?probe=1`);
 await page.waitFor("document.documentElement.dataset.reported === '1'", 120000);
 const P = JSON.parse(await page.eval("document.getElementById('report').textContent"));
-await check("page starts: no failure panel; two programs compiled once (4 shaders, 2 links)", async () => {
+await check("page starts: no failure panel; four programs compiled once (8 shaders, 4 links)", async () => {
   assert.equal(await page.eval("document.getElementById('fail').hidden"), true);
-  assert.deepEqual(await page.eval("window.__gl"), { compile: 4, link: 2 });
+  assert.deepEqual(await page.eval("window.__gl"), { compile: 8, link: 4 });
   note(`renderer: ${P.renderer} | float target: ${P.floatTarget} | drawing buffer ${P.size.join("x")}`);
 });
 await check("rendering is deterministic: same time, identical pixels", () => { for (const m of Object.values(P.moments)) assert.equal(m.identicalRerender, true); });
@@ -71,7 +71,7 @@ await check("real loop: a slow renderer (software GL) is stepped down within sec
 await check("scale changes keep the composition: canvas CSS box identical, no shader recompiles", () => {
   assert.deepEqual(mid.css, before.css);
   assert.deepEqual(mid.gl, before.gl);
-  assert.deepEqual(mid.gl, { compile: 4, link: 2 });
+  assert.deepEqual(mid.gl, { compile: 8, link: 4 });
 });
 await check("the timeline follows the clock, not the frame rate (film time tracks wall time)", () => {
   assert.ok(Math.abs(mid.t - wallElapsed) < 1.2, `film t=${mid.t.toFixed(2)} vs wall ${wallElapsed.toFixed(2)}`);
@@ -135,6 +135,64 @@ await check("screenshots written (animation stills at desktop, small and portrai
   note(`${n} screenshots in tests/shots/`);
 });
 
+// ---------------------------------------------------------------- 4b. the entire film: every act, every transition, deterministic stills
+await check("all five acts and four transitions render at fixed film timestamps", async () => {
+  const moments = [
+    [0, "act1", null, "film_00_opening_dark"],
+    [12, "act1", null, "film_12_waiting"],
+    [24, "act2", "bloom", "film_24_bloom_start"],
+    [26, "act2", "bloom", "film_26_bloom_midpoint"],
+    [40, "act2", null, "film_40_cathedral"],
+    [54, "act3", "fog", "film_54_fog_start"],
+    [56, "act3", "fog", "film_56_fog_midpoint"],
+    [70, "act3", null, "film_70_terrace"],
+    [84.8, "act4", "dark", "film_84_8_dark_start"],
+    [86.4, "act4", "dark", "film_86_4_dark_midpoint"],
+    [96, "act4", null, "film_96_storm_rising"],
+    [112, "act4", null, "film_112_oath_climax"],
+    [116.8, "act5", "continue", "film_116_8_shared_storm"],
+    [140, "act5", null, "film_140_quiet"],
+    [149, "act5", null, "film_149_final_verse"],
+    [152.4, "act5", null, "film_152_4_final_title"],
+    [154.8, "act5", null, "film_154_8_final_black"],
+  ];
+  await page.resize(960, 540, 1);
+  await page.goto(`${INDEX}?debug=1&t=0&scale=0.5`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  const seen = new Map();
+  for (const [t, scene, transition, name] of moments) {
+    const r = await page.eval(`(() => {
+      const e = window.__eternal, f = e.seek(${t}), c = document.getElementById('c'), gl = e.renderer.gl;
+      const px = new Uint8Array(c.width * c.height * 4); gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let hash = 2166136261, sum = 0, count = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        for (let k = 0; k < 4; k++) hash = Math.imul(hash ^ px[i + k], 16777619);
+        sum += px[i] + px[i + 1] + px[i + 2]; count += 3;
+      }
+      return JSON.stringify({ scene: f.sceneId, transition: f.transition?.kind || null, progress: f.transition?.p ?? null,
+        hash: hash >>> 0, mean: sum / count, done: f.done, errors: e.renderer.drainErrors() });
+    })()`).then(JSON.parse);
+    assert.equal(r.scene, scene, `scene at t=${t}`);
+    assert.equal(r.transition, transition, `transition at t=${t}`);
+    assert.deepEqual(r.errors, [], `WebGL errors at t=${t}`);
+    if ([40, 70, 96, 112, 140, 149].includes(t)) assert.ok(r.mean > 1, `blank act at t=${t}: mean ${r.mean}`);
+    if (t === 154.8) assert.equal(r.done, true, "the last still is the completed ending fade");
+    seen.set(t, r);
+    writeFileSync(join(SHOTS, `${name}_960x540.png`), await page.screenshot());
+  }
+  assert.ok(seen.get(149).mean > seen.get(154.8).mean, "the ending fades toward black");
+
+  // A different sequence of seeks must not alter the picture at any sampled instant.
+  for (const t of [26, 40, 56, 70, 86.4, 96, 112, 116.8, 140, 149, 152.4, 154.8]) {
+    const a = seen.get(t).hash;
+    const b = await page.eval(`(() => { const e = __eternal, f = e.seek(${t}), c = document.getElementById('c'), gl = e.renderer.gl;
+      const px = new Uint8Array(c.width * c.height * 4); gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let h = 2166136261; for (const v of px) h = Math.imul(h ^ v, 16777619); return h >>> 0; })()`);
+    assert.equal(b, a, `same timestamp gives identical pixels at t=${t}`);
+  }
+  note(`${moments.length} stills saved in tests/shots/, covering every act, all four handoffs, and the ending fade.`);
+});
+
 // ---------------------------------------------------------------- 5. ?bench
 await check("?bench reports environment, GL info, real-loop stats and synchronous timing separately", async () => {
   await page.resize(960, 540, 1);
@@ -146,7 +204,7 @@ await check("?bench reports environment, GL info, real-loop stats and synchronou
   assert.ok(r.gl.renderer && r.gl.version && r.gl.limits.maxTexture > 0 && r.gl.width > 0 && typeof r.gl.floatTarget === "boolean");
   assert.equal(r.verdict.kind, "software", "SwiftShader must be recognised as software");
   assert.ok(r.animationLoop.frames >= 10 && r.animationLoop.avgFps > 0 && r.animationLoop.p95Ms > 0);
-  assert.ok(r.synchronous.meanMs > 0 && r.synchronous.perTime.length === 5);
+  assert.ok(r.synchronous.meanMs > 0 && r.synchronous.perTime.length === 6);
   assert.deepEqual(r.glErrors, []);
   assert.equal(r.scale, 1);
   assert.ok(/Real animation loop/.test(text) && /Synchronous back-to-back/.test(text) && /not frame pacing/.test(text) && /SOFTWARE/.test(text));

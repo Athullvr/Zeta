@@ -10,7 +10,7 @@
   const E = window.ETERNAL || {};
   const Q = new URLSearchParams(location.search);
   const $ = s => document.querySelector(s);
-  const frameEl = $("#frame"), canvas = $("#c"), failEl = $("#fail"), textEl = $("#text"), hintEl = $("#hint");
+  const canvas = $("#c"), failEl = $("#fail"), textEl = $("#text");
   const ASPECT = 2.39;
 
   function fail(title, message, details) {
@@ -71,14 +71,14 @@
 
   // ---------- clock and loop ----------
   const clock = E.director.createClock(() => performance.now());
-  let paused = fixedT !== null || BENCH, rafId = 0, replayShown = false;
+  let paused = fixedT !== null || BENCH, rafId = 0, finished = false;
   const perf = { frames: 0, dts: [], last: 0 };
 
   function draw(t = clock.time()) {
     const frame = director.frameAt(t, opts);
     renderer.render(frame);
     overlay.update(frame, frame.post.uFade);
-    if (frame.done && !replayShown) { replayShown = true; hintEl.hidden = false; }
+    finished = frame.done;
     return frame;
   }
   function tick(now) {
@@ -92,14 +92,14 @@
     const frame = draw();
     if (!frame.done || director.loop) rafId = requestAnimationFrame(tick);
   }
-  function restart() { replayShown = false; hintEl.hidden = true; perf.last = 0; governor.reset(); clock.start(0); cancelAnimationFrame(rafId); rafId = requestAnimationFrame(tick); }
+  function restart() { finished = false; perf.last = 0; governor.reset(); clock.start(0); cancelAnimationFrame(rafId); rafId = requestAnimationFrame(tick); }
   document.addEventListener("visibilitychange", () => { perf.last = 0; governor.reset(); });
 
   if (fixedT !== null) { clock.seek(fixedT); draw(); document.documentElement.dataset.ready = "1"; }
   else if (!BENCH) { clock.start(actStart); rafId = requestAnimationFrame(tick); document.documentElement.dataset.ready = "1"; }
 
   addEventListener("keydown", e => { if ((e.key === "r" || e.key === "R") && fixedT === null && !BENCH) restart(); });
-  addEventListener("pointerdown", () => { if (replayShown && fixedT === null && !BENCH) restart(); });
+  addEventListener("pointerdown", () => { if (finished && fixedT === null && !BENCH) restart(); });
 
   function report(obj) {
     const r = document.createElement("pre");
