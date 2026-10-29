@@ -1,0 +1,57 @@
+:root {
+  --fw: 100vw; --fh: calc(100vw / 2.39);
+  --ink: #e4e9f3; --silver: #c3cde0; --gold: #b99a5b; --crimson: #8a2a35;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Hoefler Text", Georgia, "Times New Roman", serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; color: var(--ink); }
+body { display: grid; place-items: center; }
+
+/* the 2.39:1 frame; its own size is the unit for all type (cqw), so the composition holds at any window size */
+#frame {
+  position: relative; width: var(--fw); height: var(--fh); overflow: hidden; background: #000;
+  container-type: size; font-family: var(--serif);
+}
+#c { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+#text { position: absolute; inset: 0; pointer-events: none; }
+.cue { position: absolute; left: 0; right: 0; text-align: center; }
+.cue[hidden] { display: none; }
+.ch, .wd { display: inline-block; will-change: opacity, filter, transform; opacity: 0; }
+
+.title { top: 61%; }
+.title-word {
+  --ls: .3em; font-size: 6.4cqw; font-weight: 400; line-height: 1; letter-spacing: var(--ls); padding-left: var(--ls); white-space: nowrap;
+  color: #eef2fa; text-shadow: 0 0 .35em rgba(170, 190, 230, .45), 0 .02em .5em rgba(0, 0, 0, .7);
+}
+.title-rule {
+  width: 22cqw; height: 1px; margin: 2.2cqw auto 0; transform-origin: center; transform: scaleX(0);
+  background: linear-gradient(90deg, transparent, var(--gold) 20%, #e0c98f 50%, var(--gold) 80%, transparent);
+}
+
+.poem { top: 80%; font-style: italic; font-size: 2.15cqw; line-height: 1.55; color: var(--silver); text-shadow: 0 0 .8em rgba(0, 0, 0, .9), 0 0 .3em rgba(0, 0, 0, .8); }
+.poem-line { white-space: nowrap; }
+
+#hint {
+  position: absolute; bottom: 4%; left: 0; right: 0; margin: 0; text-align: center; font-style: italic;
+  font-size: 1.5cqw; color: rgba(195, 205, 224, .55); letter-spacing: .08em; animation: hintIn 1.6s ease both;
+}
+#hint[hidden] { display: none; }
+@keyframes hintIn { from { opacity: 0; } to { opacity: 1; } }
+
+#fail {
+  position: fixed; inset: 0; display: grid; align-content: center; justify-items: center; gap: 1rem; padding: 2rem; text-align: center;
+  background: #05070d; font-family: var(--serif);
+}
+#fail[hidden] { display: none; }
+#fail h1 { margin: 0; font-weight: 400; font-size: clamp(1.3rem, 3vw, 2rem); letter-spacing: .04em; color: var(--ink); }
+#fail p { margin: 0; max-width: 40rem; color: var(--silver); line-height: 1.5; }
+#fail pre {
+  max-width: min(60rem, 92vw); max-height: 50vh; overflow: auto; margin: 0; padding: 1rem; text-align: left; white-space: pre-wrap;
+  font: .8rem/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #e7b9bd; background: #0b0f1a; border: 1px solid #2a1c24;
+}
+#fail pre:empty { display: none; }
+.failed #frame { display: none; }
+.noscript { padding: 2rem; text-align: center; }
+
+@media (prefers-reduced-motion: reduce) { #hint { animation: none; } }

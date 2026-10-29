@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ETERNAL</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="frame" aria-label="ETERNAL, an opening scene">
+    <canvas id="c" aria-hidden="true"></canvas>
+    <div id="text"></div>
+    <p id="hint" hidden>Click, or press R, to watch again</p>
+  </main>
+
+  <section id="fail" hidden role="alert">
+    <h1></h1>
+    <p></p>
+    <pre></pre>
+  </section>
+  <noscript><p class="noscript">ETERNAL is drawn live by JavaScript and WebGL2. Please enable JavaScript.</p></noscript>
+
+  <script src="src/util.js"></script>
+  <script src="src/director.js"></script>
+  <script src="src/scenes/opening.js"></script>
+  <script src="src/shaders.js"></script>
+  <script src="src/renderer.js"></script>
+  <script src="src/overlay.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>
