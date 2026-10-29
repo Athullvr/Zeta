@@ -77,15 +77,15 @@ const stubCanvas = gl => ({ width: 0, height: 0, getContext: () => gl, addEventL
 
 test("setScale multiplies the buffer, resizes only buffers, and never compiles shaders", () => {
   const gl = stubGL(), canvas = stubCanvas(gl), r = createRenderer(canvas);
-  assert.equal(gl.calls.compileShader, 4); assert.equal(gl.calls.linkProgram, 2);
+  assert.equal(gl.calls.compileShader, 8); assert.equal(gl.calls.linkProgram, 4);   // four programs, compiled once: scene, interior, terrace, post
   assert.deepEqual(r.resize(1000, 418, 1), { width: 1000, height: 418 });
   assert.deepEqual(r.setScale(.5), { width: 500, height: 209 });
   assert.deepEqual(r.setScale(1), { width: 1000, height: 418 });
   assert.equal(r.scale, 1);
-  assert.equal(gl.calls.compileShader, 4, "no shader recompiled by scale changes");
-  assert.equal(gl.calls.linkProgram, 2);
+  assert.equal(gl.calls.compileShader, 8, "no shader recompiled by scale changes");
+  assert.equal(gl.calls.linkProgram, 4);
   r.resize(1200, 502, 1); r.setScale(.7); r.resize(800, 335, 2);
-  assert.equal(gl.calls.compileShader, 4, "no shader recompiled by resizes");
+  assert.equal(gl.calls.compileShader, 8, "no shader recompiled by resizes");
 });
 
 test("the pixel budget caps the base, then the render scale applies on top of the cap", () => {
@@ -117,6 +117,6 @@ test("hardware limits clamp the buffer, and tiny sizes keep a floor", () => {
 test("info reports what a benchmark needs", () => {
   const r = createRenderer(stubCanvas(stubGL())); r.resize(960, 402, 1);
   const i = r.info();
-  assert.equal(i.width, 960); assert.equal(i.renderScale, 1); assert.equal(i.shaderCompiles, 2);
+  assert.equal(i.width, 960); assert.equal(i.renderScale, 1); assert.equal(i.shaderCompiles, 4);
   assert.ok(i.limits.maxTexture > 0 && Array.isArray(i.limits.maxViewport) && i.version && "floatTarget" in i && "compileMs" in i);
 });

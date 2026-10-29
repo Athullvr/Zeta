@@ -1,8 +1,9 @@
 // Boot: wire the director, the renderer and the overlay to the page, own the animation loop, the layout and the governor.
 // URL options (for review and measurement):
-//   ?t=7.5      render one frame at that time and stop        ?loop     play again at the end
+//   ?t=7.5      render one frame at that film time and stop   ?loop     play again at the end
+//   ?act=3      start at act III (with ?t=5: the frame 5 s into act III, then stop)
 //   ?scale=0.5  fix the base render scale (turns the governor off)   ?adapt=0  turn the governor off
-//   ?bench      measure this machine (add =20 for a 20 s sample, default is the length of the film)
+//   ?bench      measure this machine: 4 s in each of six places across the film (?bench=2 for 2 s each)
 //   ?debug      expose window.__eternal                         ?probe    pixel probes used by tests/browser-check.mjs
 (function () {
   "use strict";
@@ -22,15 +23,18 @@
     if (details) console.error(title + "\n" + details);
   }
 
-  for (const k of ["util", "director", "governor", "bench", "shaders", "renderer", "overlay", "scenes"]) {
+  for (const k of ["util", "director", "script", "governor", "bench", "shaders", "renderer", "overlay", "film"]) {
     if (!E[k]) return fail("Missing source file", `The ${k} module did not load.`, "Check that every file listed in index.html is present next to it.");
   }
 
-  const fixedT = Q.has("t") ? parseFloat(Q.get("t")) : null;
   const BENCH = Q.has("bench");
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const opts = { reduced };
-  const director = E.director.createDirector([E.scenes.opening], { loop: Q.has("loop") || BENCH });
+  const director = E.director.createDirector(E.film.scenes, { loop: Q.has("loop") || BENCH });
+  // ?act=N starts at the beginning of act N; ?t= is film time, or, with ?act, time within that act. Either way the frame is
+  // a pure function of that one number.
+  const actStart = Q.has("act") ? director.actStart(Math.min(director.scenes.length, Math.max(1, parseInt(Q.get("act"), 10) || 1)) - 1) : 0;
+  const fixedT = Q.has("t") ? actStart + (parseFloat(Q.get("t")) || 0) : null;
   const scaleOpt = E.governor.parseScaleOptions(Q);
 
   let renderer;
@@ -70,10 +74,10 @@
   let paused = fixedT !== null || BENCH, rafId = 0, replayShown = false;
   const perf = { frames: 0, dts: [], last: 0 };
 
-  function draw() {
-    const frame = director.frameAt(clock.time(), opts);
+  function draw(t = clock.time()) {
+    const frame = director.frameAt(t, opts);
     renderer.render(frame);
-    overlay.update(frame, frame.uniforms.uFade);
+    overlay.update(frame, frame.post.uFade);
     if (frame.done && !replayShown) { replayShown = true; hintEl.hidden = false; }
     return frame;
   }
@@ -92,7 +96,7 @@
   document.addEventListener("visibilitychange", () => { perf.last = 0; governor.reset(); });
 
   if (fixedT !== null) { clock.seek(fixedT); draw(); document.documentElement.dataset.ready = "1"; }
-  else if (!BENCH) { clock.start(0); rafId = requestAnimationFrame(tick); document.documentElement.dataset.ready = "1"; }
+  else if (!BENCH) { clock.start(actStart); rafId = requestAnimationFrame(tick); document.documentElement.dataset.ready = "1"; }
 
   addEventListener("keydown", e => { if ((e.key === "r" || e.key === "R") && fixedT === null && !BENCH) restart(); });
   addEventListener("pointerdown", () => { if (replayShown && fixedT === null && !BENCH) restart(); });
@@ -106,36 +110,44 @@
   }
 
   // ---------- ?bench ----------
-  // Stage 1 plays the film in the real requestAnimationFrame loop (governor off, scale as set) and records frame times.
-  // Stage 2 renders frames back to back, synchronised with a read-back, which ignores vsync. The two are reported apart.
+  // Stage 1 plays short windows of the film in the real requestAnimationFrame loop (governor off, scale as set), one in each
+  // act and one at the storm's climax, because the acts do not cost the same. Stage 2 renders frames back to back at the same
+  // moments, synchronised with a read-back, which ignores vsync. The two are reported apart.
+  const BENCH_AT = [12, 40, 70, 96, 112, 140];     // film seconds: act I, II, III, the storm gathering, the climax, act V
   function runBench() {
-    const seconds = Math.min(120, Math.max(3, parseFloat(Q.get("bench")) || director.duration));
+    const per = Math.min(20, Math.max(1, parseFloat(Q.get("bench")) || 4));
     const warnings = [];
     if (document.hidden) warnings.push("The tab is hidden: the browser throttles requestAnimationFrame, so stage 1 will be wrong.");
     if (scaleOpt.manual) warnings.push(`Manual ?scale=${scaleOpt.manual} is in effect.`);
     const panel = document.createElement("pre");
-    panel.id = "benchPanel"; panel.textContent = `ETERNAL benchmark: sampling the real animation loop for ${seconds} s. Keep this tab in front.`;
+    panel.id = "benchPanel"; panel.textContent = `ETERNAL benchmark: sampling the real animation loop, ${per} s at each of ${BENCH_AT.length} places in the film. Keep this tab in front.`;
     document.body.appendChild(panel);
 
-    const dts = []; let last = 0, start = 0;
-    clock.start(0);
+    const windows = BENCH_AT.map(() => []), all = [];
+    let w = 0, last = 0, start = 0;
     function loop(now) {
-      if (!start) start = now;
-      if (last) dts.push(now - last);
+      if (!start) { start = now; last = 0; }
+      const el = (now - start) / 1000;
+      if (last && el > .0) { const dt = now - last; if (windows[w].length || el > .1) windows[w].push(dt); }
       last = now;
-      draw();
-      if (now - start < seconds * 1000) requestAnimationFrame(loop); else finishBench();
+      draw(BENCH_AT[w] + el);
+      if (el < per) requestAnimationFrame(loop);
+      else if (++w < BENCH_AT.length) { start = 0; requestAnimationFrame(loop); }
+      else finishBench();
     }
     requestAnimationFrame(loop);
 
     function finishBench() {
-      const animationLoop = E.bench.frameStats(dts.slice(10));      // the first frames are warm-up
+      const per3 = windows.map(a => a.slice(3));                        // the first frames of a window are warm-up
+      for (const a of per3) all.push(...a);
+      const animationLoop = E.bench.frameStats(all);
+      animationLoop.windows = per3.map((a, i) => Object.assign({ at: BENCH_AT[i] }, E.bench.frameStats(a)));
       panel.textContent = "Measuring synchronous render cost...";
       setTimeout(() => {
         const samples = [];
-        for (const t of [2, 5, 8, 11, 13]) {
+        for (const t of BENCH_AT) {
           renderer.render(director.frameAt(t, opts)); renderer.finish();
-          const t0 = performance.now(), n = 12;
+          const t0 = performance.now(), n = 8;
           for (let i = 0; i < n; i++) renderer.render(director.frameAt(t, opts));
           renderer.finish();
           samples.push({ t, ms: (performance.now() - t0) / n });

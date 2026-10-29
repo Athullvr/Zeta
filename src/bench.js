@@ -59,6 +59,7 @@
     else {
       L.push(`   ${a.avgFps} fps average (${a.avgMs} ms), median ${a.medianMs} ms, 95th percentile ${a.p95Ms} ms, 99th ${a.p99Ms} ms, worst ${a.maxMs} ms`);
       L.push(`   1% low ${a.onePercentLowFps} fps; display looks like ${a.estimatedRefreshHz} Hz; ${a.slowFrames} frames took over 1.5 display intervals`);
+      if (a.windows) for (const w of a.windows) if (w.frames) L.push(`   film t=${String(w.at).padStart(3)} s: ${String(w.avgFps).padStart(5)} fps avg, 95th percentile ${w.p95Ms} ms, worst ${w.maxMs} ms`);
       L.push("   This is what you see. It is capped by your display's refresh rate and includes browser compositing.");
     }
     L.push("");

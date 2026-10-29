@@ -12,7 +12,7 @@
   }
 
   function buildTitle(cue) {
-    const box = el("div", "cue title"), word = el("div", "title-word");
+    const box = el("div", `cue title place-${cue.place || "mid"}${cue.variant ? " variant-" + cue.variant : ""}`), word = el("div", "title-word");
     const letters = [...cue.text].map(ch => { const s = el("span", "ch", ch); word.appendChild(s); return s; });
     const rule = el("div", "title-rule");
     box.append(word, rule);
@@ -21,7 +21,7 @@
   }
 
   function buildPoem(cue) {
-    const box = el("div", "cue poem");
+    const box = el("div", `cue poem place-${cue.place || "low"}`);
     const lines = cue.lines.map(text => {
       const line = el("div", "poem-line");
       const words = text.split(" ").map((w, i, a) => { const s = el("span", "wd", w); line.appendChild(s); if (i < a.length - 1) line.appendChild(document.createTextNode(" ")); return s; });
@@ -72,8 +72,11 @@
     }
 
     // fade: 0..1 global fade-to-black, so the words go with the picture
+    const live = new Set();
     function update(frame, fade = 0) {
+      live.clear();
       for (const c of frame.cues) {
+        live.add(c.id);
         const p = ensure(c);
         const visible = c.visible || c.exit > 0 && c.exit < 1;
         if (p.box.hidden === visible) p.box.hidden = !visible;
@@ -83,6 +86,7 @@
         last.set(c.id, sig);
         (p.kind === "title" ? paintTitle : paintPoem)(p, c, fade);
       }
+      for (const [id, p] of parts) if (!live.has(id) && !p.box.hidden) p.box.hidden = true;     // cues of acts no longer on screen
     }
     return { update };
   }

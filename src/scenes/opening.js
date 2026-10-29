@@ -53,6 +53,7 @@
       uFlash: flash,
       uFlashX: flashX,
       uCrimson: smooth(seg(t, 8, 13)),
+      uDrift: t, uStorm: 0, uBolt: 0, uBoltX: 0, uBoltSeed: 0, uGreat: 1,   // the wind carries clouds and mist at the pace of the film; no storm yet, no bolt, the great window as it was
 
       // post
       uBloom: .55,

@@ -9,9 +9,9 @@ function declared(src) {
   return out;
 }
 
-for (const [prog, src] of [["scene", SH.SCENE_FRAG], ["post", SH.POST_FRAG]]) {
+for (const [prog, src] of Object.entries(SH.FRAGS)) {
   test(`${prog}: declared uniforms and the contract agree`, () => {
-    const d = declared(src); delete d.uScene;       // the sampler is bound by the renderer, not by a scene
+    const d = declared(src); delete d.uScene; delete d.uSceneB;       // the samplers are bound by the renderer, not by a scene
     assert.deepEqual(d, SH.PROGRAM_UNIFORMS[prog]);
   });
   test(`${prog}: is GLSL ES 3.00 and well-formed`, () => {
@@ -30,10 +30,12 @@ test("the vertex shader is a fullscreen triangle with no attributes", () => {
   assert.ok(/gl_VertexID/.test(SH.VERT) && !/\bin\s+vec/.test(SH.VERT));
 });
 
-test("exactly two programs, as the brief asks for a small number", () => {
-  assert.deepEqual(Object.keys(SH.PROGRAM_UNIFORMS).sort(), ["post", "scene"]);
+test("a small, fixed set of programs: three scenes and the post pass, all compiled at start", () => {
+  assert.deepEqual(Object.keys(SH.PROGRAM_UNIFORMS).sort(), ["interior", "post", "scene", "terrace"]);
+  assert.deepEqual(Object.keys(SH.FRAGS).sort(), Object.keys(SH.PROGRAM_UNIFORMS).sort());
 });
 
 test("every shared uniform is set by the renderer, so scenes never need to provide them", () => {
   assert.deepEqual(Object.keys(SH.UNIFORMS.shared).sort(), ["uRes", "uTime"]);
+  assert.deepEqual(Object.keys(SH.UNIFORMS.transition).sort(), ["uMix", "uTrans"]);
 });

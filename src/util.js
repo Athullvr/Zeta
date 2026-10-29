@@ -41,7 +41,29 @@
     return clamp((enter - start) / span);
   }
 
-  const api = { clamp, lerp, seg, smooth, smoother, easeOut, easeInOut, rng, strike, stagger };
+  // a bolt of lightning: a hard return stroke, a dip, a second stroke, then it is gone in about a quarter of a second
+  function bolt(t, at) {
+    const d = t - at;
+    if (d < 0 || d > .26) return 0;
+    return d < .07 ? 1 : d < .11 ? .55 : d < .15 ? .9 : Math.max(0, .9 * (1 - (d - .15) / .11));
+  }
+
+  // smooth piecewise interpolation through [[t, value], ...] (times ascending); each segment eased, so no velocity jumps
+  function keyframes(t, pts, ease = smoother) {
+    if (t <= pts[0][0]) return pts[0][1];
+    for (let i = 1; i < pts.length; i++) if (t <= pts[i][0]) return lerp(pts[i - 1][1], pts[i][1], ease(seg(t, pts[i - 1][0], pts[i][0])));
+    return pts[pts.length - 1][1];
+  }
+
+  // the running integral of a rate, tabulated once and read back by linear interpolation (wind speed -> wind phase):
+  // phase(t) is then continuous however fast the rate changes, and the same for a given t every time
+  function integral(rate, T, dt = .05) {
+    const n = Math.ceil(T / dt) + 1, table = new Float64Array(n);
+    for (let i = 1; i < n; i++) table[i] = table[i - 1] + .5 * (rate((i - 1) * dt) + rate(i * dt)) * dt;
+    return t => { const x = clamp(t / dt, 0, n - 1), i = Math.min(n - 2, Math.floor(x)); return table[i] + (table[i + 1] - table[i]) * (x - i); };
+  }
+
+  const api = { clamp, lerp, seg, smooth, smoother, easeOut, easeInOut, rng, strike, stagger, bolt, keyframes, integral };
   if (typeof module === "object" && module.exports) module.exports = api;
   else (root.ETERNAL = root.ETERNAL || {}).util = api;
 })(typeof self !== "undefined" ? self : globalThis);

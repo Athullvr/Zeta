@@ -217,10 +217,10 @@ void main() {
   col *= mix(.5, 1., uLight);
 
   // haze: thicker with distance, bright where the shafts pass
-  float tm = min(tHit, 28.);
-  float N = 18.;
-  float acc = 0., j = hash21(gl_FragCoord.xy);
-  for (int i = 0; i < 18; i++) acc += beamDensity(ro + rd * ((float(i) + j) / N * tm)) * (tm / N);
+  float tm = min(tHit, 22.);
+  float N = 30.;
+  float acc = 0., j = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(.06711056, .00583715))));   // interleaved gradient noise: far less grainy than white noise
+  for (int i = 0; i < 30; i++) acc += beamDensity(ro + rd * ((float(i) + j) / N * tm)) * (tm / N);
   float fog = 1. - exp(-tHit * uFog * .018);
   col = mix(col, vec3(.030, .042, .075) * uLight, fog * .75);
   col += BEAM * acc * .075 * uBeams;

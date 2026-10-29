@@ -19,7 +19,9 @@ body { display: grid; place-items: center; }
 .cue[hidden] { display: none; }
 .ch, .wd { display: inline-block; will-change: opacity, filter, transform; opacity: 0; }
 
-.title { top: 63%; }
+.place-low { top: 81%; }
+.place-mid { top: 63%; }
+.place-high { top: 34%; }
 .title-word {
   --ls: .3em; font-size: 5.6cqw; font-weight: 400; line-height: 1; letter-spacing: var(--ls); padding-left: var(--ls); white-space: nowrap;
   color: #eef2fa; text-shadow: 0 0 .35em rgba(170, 190, 230, .45), 0 .02em .5em rgba(0, 0, 0, .7);
@@ -29,7 +31,7 @@ body { display: grid; place-items: center; }
   background: linear-gradient(90deg, transparent, var(--gold) 20%, #e0c98f 50%, var(--gold) 80%, transparent);
 }
 
-.poem { top: 81%; font-style: italic; font-size: max(2cqw, 11px); line-height: 1.55; color: var(--silver); text-shadow: 0 0 .8em rgba(0, 0, 0, .9), 0 0 .3em rgba(0, 0, 0, .8); }
+.poem { font-style: italic; font-size: max(2cqw, 11px); line-height: 1.55; color: var(--silver); text-shadow: 0 0 .8em rgba(0, 0, 0, .9), 0 0 .3em rgba(0, 0, 0, .8); }
 .poem-line { white-space: nowrap; }
 
 #hint {
@@ -59,3 +61,8 @@ body { display: grid; place-items: center; }
 /* ?bench: a plain readable report over the picture */
 #benchPanel { position: fixed; inset: 1rem; z-index: 5; margin: 0; padding: 1rem 1.2rem; overflow: auto; white-space: pre-wrap; background: rgba(4, 6, 12, .92);
   border: 1px solid #2a3350; font: .8rem/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #cfd8ec; }
+
+/* the closing title: the same word, smaller and dimmer */
+.variant-quiet { opacity: .8; }
+.variant-quiet .title-word { font-size: 3.6cqw; color: #cdd5e6; text-shadow: 0 0 .5em rgba(150, 170, 215, .3), 0 .02em .5em rgba(0, 0, 0, .8); }
+.variant-quiet .title-rule { width: 12cqw; margin-top: 1.2cqw; }
