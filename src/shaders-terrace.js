@@ -23,7 +23,7 @@ ${C.SKY}
 const vec2 MOON_C = vec2(.30, .17);
 const float MOON_R = .20;
 const vec3 SILVER = vec3(.74, .80, .92);
-const vec3 PETAL = vec3(.42, .07, .12);
+const vec3 PETAL = vec3(.30, .05, .09);
 const float S_ARCH = .62;                 // spacing of the arcade's piers
 vec2 gQ;
 
@@ -116,7 +116,7 @@ vec3 figureLight(vec2 p, vec2 foot, float scale) {
   float body = smoothstep(.02, -.012, d) * keep;
   float halo = exp(-max(d, 0.) * 14.) * .22 * uFigure * (.6 + .4 * keep);
   vec3 c = vec3(.60, .72, 1.) * (.45 + .55 * smoothstep(0., -.07, d)) + vec3(1., .78, .5) * .22 * smoothstep(.28, 0., length(q - vec2(0., .66)));
-  return (c * body + vec3(.5, .62, .95) * halo) * flick * uFigure;
+  return (c * body * .75 + vec3(.5, .62, .95) * halo) * flick * uFigure;
 }
 
 // ---------- the arcade: ruined, pointed, wind-worn ----------
@@ -174,7 +174,7 @@ void main() {
   col += vec3(.85, .90, 1.) * st * uStars * smoothstep(-.05, .25, pS.y) * (1. - cl) * (1. - smoothstep(.55, 0., r) * .9);
   float halo = .5 * exp(-r * 4.5) + .3 * exp(-r * 11.) + .2 * exp(-pow(r / (MOON_R * 1.5), 3.));
   col += SILVER * halo * uLight * uMoon * .5;
-  col = mix(col, moonSurface(dm, MOON_R), smoothstep(MOON_R, MOON_R - .003, r) * uMoon * (1. - cl * .65));
+  col = mix(col, moonSurface(dm, MOON_R) * .72, smoothstep(MOON_R, MOON_R - .003, r) * uMoon * (1. - cl * .65));
   vec3 cloudCol = mix(vec3(.030, .042, .078), vec3(.55, .63, .78), clamp(exp(-r * 2.) * (.4 + .6 * uMoon) * 1.2, 0., 1.)) * uLight;
   col = mix(col, cloudCol, cl * .8);
 
@@ -216,8 +216,8 @@ void main() {
   col = mix(col, mistColor(pa), mistBand(pa, -.27, .05, .04, 17.) * uMist * .55);
 
   // petals in the middle distance
-  col += petals(pg, 9., 3., .05, .30, .5) * uPetals * .6 * smoothstep(-.3, .0, pg.y);
-  col += petals(pa, 5., 11., .09, .33, .55) * uPetals * .85;
+  col += petals(pg, 14., 3., .05, .24, .30) * uPetals * .5 * smoothstep(-.3, .0, pg.y);
+  col += petals(pa, 8., 11., .09, .26, .26) * uPetals * .6;
 
   // the balustrade in front: a worn rail on little pointed arches, and thorn vines hanging from above
   vec2 pb = layerP(1.25);
@@ -238,7 +238,7 @@ void main() {
   col = mix(col, vec3(.003, .005, .012), vines);
 
   // petals in front, soft and large; a mist that moves faster than anything else
-  col += petals(pv, 3., 23., .13, .36, .45) * uPetals * 1.1;
+  col += petals(pv, 4., 23., .13, .28, .16) * uPetals * .7;
   col = mix(col, mistColor(pb) * .8, mistBand(pb, -.40, .08, .07, 29.) * uMist * .5);
 
   fragColor = vec4(col, 1.);
