@@ -16,6 +16,19 @@ const CHROME = findChrome();
 if (!CHROME) { console.log("SKIP: no headless Chromium found (set CHROME=...)"); process.exit(0); }
 mkdirSync(SHOTS, { recursive: true });
 
+// Authorized self-created 440 Hz test tone; generated only in ignored browser-test output.
+function makeTestTone(seconds = 70, sampleRate = 12000) {
+  const samples = seconds * sampleRate, dataBytes = samples * 2, wav = Buffer.alloc(44 + dataBytes);
+  wav.write("RIFF", 0); wav.writeUInt32LE(36 + dataBytes, 4); wav.write("WAVE", 8);
+  wav.write("fmt ", 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24); wav.writeUInt32LE(sampleRate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write("data", 36); wav.writeUInt32LE(dataBytes, 40);
+  for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 440 * i / sampleRate) * 5000), 44 + i * 2);
+  return wav;
+}
+const TONE_PATH = join(SHOTS, "eternal-test-tone.wav");
+writeFileSync(TONE_PATH, makeTestTone());
+
 let failures = 0;
 const check = async (name, fn) => { try { await fn(); console.log("ok   ", name); } catch (e) { failures++; console.log("FAIL ", name, "\n     ", String(e.message).split("\n")[0]); } };
 const note = s => console.log("      " + s);
@@ -248,10 +261,106 @@ await check("?bench reports environment, GL info, real-loop stats and synchronou
   assert.ok(r.synchronous.meanMs > 0 && r.synchronous.perTime.length === 6);
   assert.deepEqual(r.glErrors, []);
   assert.equal(r.scale, 1);
+  assert.equal(await page.eval("window.__eternal.audioController === null"), true, "bench must not initialize a soundtrack");
   assert.ok(/Real animation loop/.test(text) && /Synchronous back-to-back/.test(text) && /not frame pacing/.test(text) && /SOFTWARE/.test(text));
   writeFileSync(join(SHOTS, "bench-software-sandbox.txt"), text + "\n");
   note(`real loop ${r.animationLoop.avgFps} fps (${r.animationLoop.frames} frames); synchronous ${r.synchronous.meanMs} ms/frame; verdict ${r.verdict.kind}`);
 });
+
+// ---------------------------------------------------------------- 5b. optional local audio and synchronization controls
+await check("a missing local soundtrack reports a soft silent fallback and never blocks the film", async () => {
+  await page.resize(960, 540, 1);
+  await page.goto(`${INDEX}?debug=1&audio=assets/audio/not-supplied.mp3`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  await page.waitFor("__eternal.audioController.failed === true", 15000);
+  assert.equal(await page.eval("document.getElementById('fail').hidden"), true);
+  assert.equal(await page.eval("document.querySelector('#controls').hidden"), false);
+  const initial = await page.eval("JSON.stringify({ paused: __eternal.audioController.audio.paused, context: __eternal.audioController.context, status: document.getElementById('audio-status').textContent })").then(JSON.parse);
+  assert.equal(initial.paused, true);
+  assert.equal(initial.context, null, "audio context waits for a user action");
+  assert.match(initial.status, /missing|unreadable/i);
+  const at = await page.eval("__eternal.clock.time()");
+  await page.click("#play-film");
+  await page.waitFor(`__eternal.clock.time() > ${at + .3}`, 10000);
+  assert.equal(await page.eval("document.getElementById('fail').hidden"), true);
+  assert.equal(await page.eval("__eternal.audioController.audio.paused"), true);
+  assert.match(await page.eval("document.getElementById('audio-status').textContent"), /silently/);
+  note("missing path handled without a WebGL failure screen; visual playback advanced silently.");
+});
+
+await check("a generated WAV follows the film clock through play, pause, resume, restart, seek, fades, mute and silent preview", async () => {
+  const toneUrl = `tests/shots/${TONE_PATH.split(/[\\/]/).pop()}`;
+  await page.goto(`${INDEX}?debug=1&audio=${encodeURIComponent(toneUrl)}&offset=0.4&fadein=4&fadeout=50&duration=60`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  await page.waitFor("__eternal.audioController.audio.readyState >= 1", 15000);
+  const before = await page.eval("JSON.stringify({ paused: __eternal.audioController.audio.paused, context: __eternal.audioController.context, duration: __eternal.playbackDuration, path: __eternal.audioController.config.src })").then(JSON.parse);
+  assert.equal(before.paused, true, "the file may load, but audio must not autoplay");
+  assert.equal(before.context, null);
+  assert.equal(before.duration, 60);
+  assert.ok(before.path.endsWith("eternal-test-tone.wav"), `audio path ${before.path}`);
+  assert.ok(await page.eval("document.querySelector('#play-film').tabIndex >= 0 && document.querySelector('label[for=film-seek]') !== null"), "controls are keyboard reachable and labelled");
+
+  await page.click("#play-film");
+  note("WAV control check: explicit play");
+  await page.waitFor("__eternal.audioController.isPlaying", 10000);
+  await page.waitFor("__eternal.audioController.audio.currentTime > 0.5", 10000);
+  const running = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, rate: __eternal.audioController.audio.playbackRate, state: __eternal.audioController.context.state, gain: __eternal.audioController.gain })").then(JSON.parse);
+  assert.equal(running.state, "running", "suspended AudioContext resumes after the trusted Play click");
+  assert.equal(running.rate, 1);
+  assert.ok(Math.abs(running.audio - (.4 + running.t)) < .35, `audio ${running.audio} vs film ${running.t}`);
+  assert.ok(running.gain >= 0 && running.gain <= .72, `fade-in gain ${running.gain}`);
+
+  await page.click("#pause-film");
+  const frozen = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, paused: __eternal.audioController.audio.paused })").then(JSON.parse);
+  await sleep(350);
+  const afterPause = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);
+  assert.equal(frozen.paused, true);
+  assert.ok(Math.abs(afterPause.t - frozen.t) < .03, "film clock freezes on pause");
+  assert.ok(Math.abs(afterPause.audio - frozen.audio) < .06, "soundtrack freezes with the film");
+
+  await page.click("#resume-film");
+  note("WAV control check: resume");
+  await page.waitFor(`__eternal.clock.time() > ${frozen.t + .35}`, 10000);
+  const resumed = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);
+  assert.ok(Math.abs(resumed.audio - (.4 + resumed.t)) < .35, "resume stays aligned to the same clock");
+
+  await page.eval("(() => { const s = document.getElementById('film-seek'); s.value = '2.5'; s.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  const sought = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);
+  assert.ok(Math.abs(sought.t - 2.5) < .02);
+  assert.ok(Math.abs(sought.audio - 2.9) < .1, `seek audio to offset + film time: ${sought.audio}`);
+  const fadeInGain = await page.eval("__eternal.audioController.gain");
+  assert.ok(Math.abs(fadeInGain - .45) < .04, `mid fade-in gain should reflect .625 envelope: ${fadeInGain}`);
+
+  await page.eval("(() => { const v = document.getElementById('music-volume'); v.value = '0.5'; v.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await page.eval("(() => { const s = document.getElementById('film-seek'); s.value = '20'; s.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await sleep(60);
+  const faded = await page.eval("__eternal.audioController.gain");
+  assert.ok(Math.abs(faded - .4) < .06, `fade-out and volume multiply to about .4, got ${faded}`);
+  await page.click("#mute-music");
+  assert.equal(await page.eval("__eternal.audioController.gain"), 0);
+  await page.click("#mute-music");
+
+  await page.click("#silent-preview");
+  note("WAV control check: silent preview on");
+  const silentAt = await page.eval("JSON.stringify({ t: __eternal.clock.time(), paused: __eternal.audioController.audio.paused })").then(JSON.parse);
+  assert.equal(silentAt.paused, true);
+  await page.waitFor(`__eternal.clock.time() > ${silentAt.t + .25}`, 10000);
+  await page.click("#silent-preview");
+  note("WAV control check: silent preview off");
+  await page.waitFor("__eternal.audioController.isPlaying", 10000);
+  assert.ok(Math.abs(await page.eval("__eternal.audioController.audio.currentTime - (0.4 + __eternal.clock.time())")) < .35);
+
+  await page.click("#restart-film");
+  note("WAV control check: restart");
+  await page.waitFor("__eternal.audioController.isPlaying", 10000);
+  await page.waitFor("!__eternal.audioController.audio.seeking && Math.abs(__eternal.audioController.audio.currentTime - (0.4 + __eternal.clock.time())) < 0.15", 5000);
+  const restarted = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, rate: __eternal.audioController.audio.playbackRate })").then(JSON.parse);
+  assert.ok(restarted.t < 1.5, `restart returns the film to its beginning: ${restarted.t}`);
+  assert.ok(Math.abs(restarted.audio - (.4 + restarted.t)) < .15, `restart returns soundtrack to the configured offset: ${restarted.audio}`);
+  assert.equal(restarted.rate, 1, "playback speed remains unchanged");
+  note(`WAV verified: start offset .4s, film/audio drift <.35s; fade/mute/silent controls passed; duration ${before.duration}s.`);
+});
+
 await page.close();
 
 // ---------------------------------------------------------------- 6. no WebGL2

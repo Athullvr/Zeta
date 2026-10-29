@@ -23,7 +23,7 @@
     if (details) console.error(title + "\n" + details);
   }
 
-  for (const k of ["util", "director", "script", "governor", "bench", "shaders", "renderer", "overlay", "film"]) {
+  for (const k of ["util", "director", "script", "governor", "bench", "audio", "shaders", "renderer", "overlay", "film"]) {
     if (!E[k]) return fail("Missing source file", `The ${k} module did not load.`, "Check that every file listed in index.html is present next to it.");
   }
 
@@ -31,6 +31,8 @@
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const opts = { reduced };
   const director = E.director.createDirector(E.film.scenes, { loop: Q.has("loop") || BENCH });
+  const audioConfig = E.audio.configFromQuery(Q);
+  const playbackDuration = E.audio.resolveDuration(audioConfig, director.duration);
   // ?act=N starts at the beginning of act N; ?t= is film time, or, with ?act, time within that act. Either way the frame is
   // a pure function of that one number.
   const actStart = Q.has("act") ? director.actStart(Math.min(director.scenes.length, Math.max(1, parseInt(Q.get("act"), 10) || 1)) - 1) : 0;
@@ -49,6 +51,28 @@
   }
 
   const overlay = E.overlay.createOverlay(textEl);
+
+  // Normal playback owns one local audio element. Still renders, loops and benchmarks never load or start audio.
+  const controls = $("#controls"), controlsEnabled = fixedT === null && !BENCH && !Q.has("loop") && !Q.has("probe");
+  const audioStatus = $("#audio-status");
+  let audioController = null;
+  if (controlsEnabled) {
+    const audioElement = new Audio();
+    audioController = E.audio.createAudioController({
+      audio: audioElement,
+      AudioContext: window.AudioContext || window.webkitAudioContext,
+      config: audioConfig,
+      onStatus: status => { audioStatus.textContent = status; },
+    });
+    controls.hidden = false;
+  }
+  const seekEl = $("#film-seek"), timeEl = $("#film-time");
+  seekEl.max = String(playbackDuration);
+  const formatTime = seconds => {
+    const s = Math.max(0, Math.floor(Number(seconds) || 0));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  timeEl.textContent = `0:00 / ${formatTime(playbackDuration)}`;
 
   // The governor only runs in the live loop, never for stills, benchmarks or when the scale is set by hand.
   const governor = E.governor.createGovernor({ enabled: scaleOpt.adapt && fixedT === null && !BENCH, min: .5, max: 1 });
@@ -71,14 +95,21 @@
 
   // ---------- clock and loop ----------
   const clock = E.director.createClock(() => performance.now());
-  let paused = fixedT !== null || BENCH, rafId = 0, finished = false;
+  let paused = fixedT !== null || BENCH, rafId = 0, finished = false, seeking = false;
   const perf = { frames: 0, dts: [], last: 0 };
 
   function draw(t = clock.time()) {
-    const frame = director.frameAt(t, opts);
+    const visualTime = director.loop ? t : Math.min(playbackDuration, t);
+    const frame = director.frameAt(visualTime, opts);
     renderer.render(frame);
     overlay.update(frame, frame.post.uFade);
-    finished = frame.done;
+    if (audioController) audioController.sync(visualTime, playbackDuration);
+    finished = !director.loop && (frame.done || visualTime >= playbackDuration);
+    if (controlsEnabled) {
+      if (!seeking) seekEl.value = String(Math.min(playbackDuration, visualTime));
+      timeEl.textContent = `${formatTime(visualTime)} / ${formatTime(playbackDuration)}`;
+      updateControls();
+    }
     return frame;
   }
   function tick(now) {
@@ -89,17 +120,70 @@
       if (s !== null) { renderer.setScale(s); publishScale(); }
     }
     perf.last = now; perf.frames++;
-    const frame = draw();
-    if (!frame.done || director.loop) rafId = requestAnimationFrame(tick);
+    const frame = draw(clock.time());
+    if ((!frame.done && clock.time() < playbackDuration) || director.loop) rafId = requestAnimationFrame(tick);
+    else {
+      clock.pause(); clock.seek(playbackDuration); paused = true; finished = true;
+      if (audioController) audioController.pause();
+      updateControls();
+    }
   }
-  function restart() { finished = false; perf.last = 0; governor.reset(); clock.start(0); cancelAnimationFrame(rafId); rafId = requestAnimationFrame(tick); }
+  function startPlayback(at = 0) {
+    const t = Math.max(0, Math.min(playbackDuration, Number(at) || 0));
+    finished = false; paused = false; perf.last = 0; governor.reset(); clock.start(t);
+    if (audioController) audioController.playAt(t, { silent: $("#silent-preview").checked, duration: playbackDuration });
+    cancelAnimationFrame(rafId); draw(t); rafId = requestAnimationFrame(tick);
+  }
+  function restart() { startPlayback(0); }
+  function pausePlayback() {
+    if (!paused) clock.pause();
+    paused = true; cancelAnimationFrame(rafId);
+    if (audioController) audioController.pause();
+    draw(clock.time()); updateControls();
+  }
+  function resumePlayback() {
+    if (finished) return;
+    startPlayback(clock.time());
+  }
+  function seekPlayback(t) {
+    const at = Math.max(0, Math.min(playbackDuration, Number(t) || 0));
+    clock.seek(at);
+    if (audioController) audioController.seek(at, playbackDuration, !paused && !finished);
+    draw(at);
+    if (!paused && !finished && !rafId) rafId = requestAnimationFrame(tick);
+  }
+  function updateControls() {
+    if (!controlsEnabled) return;
+    $("#pause-film").disabled = paused || finished;
+    $("#resume-film").disabled = !paused || finished;
+  }
   document.addEventListener("visibilitychange", () => { perf.last = 0; governor.reset(); });
 
+  if (controlsEnabled) {
+    $("#play-film").addEventListener("click", () => startPlayback(0));
+    $("#pause-film").addEventListener("click", pausePlayback);
+    $("#resume-film").addEventListener("click", resumePlayback);
+    $("#restart-film").addEventListener("click", restart);
+    seekEl.addEventListener("pointerdown", () => { seeking = true; });
+    seekEl.addEventListener("input", () => { seeking = true; seekPlayback(parseFloat(seekEl.value)); });
+    seekEl.addEventListener("change", () => { seeking = false; });
+    seekEl.addEventListener("pointerup", () => { seeking = false; });
+    $("#music-volume").addEventListener("input", e => audioController.setVolume(parseFloat(e.target.value)));
+    const mute = $("#mute-music");
+    mute.addEventListener("click", () => {
+      const next = mute.getAttribute("aria-pressed") !== "true";
+      mute.setAttribute("aria-pressed", String(next));
+      mute.textContent = next ? "Unmute" : "Mute";
+      audioController.setMuted(next);
+    });
+    $("#silent-preview").addEventListener("change", e => audioController.setSilent(e.target.checked));
+  }
+
   if (fixedT !== null) { clock.seek(fixedT); draw(); document.documentElement.dataset.ready = "1"; }
-  else if (!BENCH) { clock.start(actStart); rafId = requestAnimationFrame(tick); document.documentElement.dataset.ready = "1"; }
+  else if (!BENCH) { clock.start(actStart); paused = false; rafId = requestAnimationFrame(tick); document.documentElement.dataset.ready = "1"; updateControls(); }
 
   addEventListener("keydown", e => { if ((e.key === "r" || e.key === "R") && fixedT === null && !BENCH) restart(); });
-  addEventListener("pointerdown", () => { if (finished && fixedT === null && !BENCH) restart(); });
+  addEventListener("pointerdown", e => { if (finished && fixedT === null && !BENCH && !controls.contains(e.target)) restart(); });
 
   function report(obj) {
     const r = document.createElement("pre");
@@ -176,12 +260,12 @@
   // ---------- debugging hooks ----------
   if (Q.has("debug") || BENCH || Q.has("probe")) {
     window.__eternal = {
-      renderer, governor, director, clock, perf, layout, frameSize,
+      renderer, governor, director, clock, perf, layout, frameSize, audioController, playbackDuration,
       info: renderer.info,
       avgFps() { const d = perf.dts; return d.length ? Math.round(1000 / (d.reduce((a, b) => a + b, 0) / d.length)) : 0; },
       setScale(s) { const r = renderer.setScale(s); publishScale(); if (paused) draw(); return r; },
-      seek(t) { clock.seek(t); paused = true; cancelAnimationFrame(rafId); return draw(); },
-      stop() { cancelAnimationFrame(rafId); paused = true; },
+      seek(t) { clock.seek(t); paused = true; cancelAnimationFrame(rafId); if (audioController) audioController.pause(); return draw(); },
+      stop() { cancelAnimationFrame(rafId); paused = true; if (audioController) audioController.pause(); },
     };
   }
 

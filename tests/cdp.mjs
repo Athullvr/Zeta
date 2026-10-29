@@ -57,6 +57,11 @@ export async function launch(chrome, extraArgs = SOFTWARE_GL) {
       if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
       return r.result.value;
     },
+    async click(selector) {
+      const box = await page.eval(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      await cmd("Input.dispatchMouseEvent", { type: "mousePressed", x: box.x, y: box.y, button: "left", clickCount: 1 });
+      await cmd("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x, y: box.y, button: "left", clickCount: 1 });
+    },
     async waitFor(expression, timeoutMs = 60000, everyMs = 100) {
       const t0 = Date.now();
       while (Date.now() - t0 < timeoutMs) { if (await page.eval(expression)) return true; await new Promise(r => setTimeout(r, everyMs)); }

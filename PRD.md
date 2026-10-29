@@ -6,7 +6,7 @@ This document describes the current source in this repository. It separates impl
 
 ETERNAL is an offline, procedural gothic romance told as a five act cinematic poem. An immortal figure waits through centuries for a lost beloved. Its emotional movement is loneliness, memory, longing, an oath against time, and acceptance of love that persists without physical presence.
 
-The film is drawn at runtime with JavaScript and WebGL2 shaders. It has no image, video, audio, or font assets; no third party packages; and no runtime network requests. It runs by opening `index.html` from disk. The current milestone has no audio system.
+The film is drawn at runtime with JavaScript and WebGL2 shaders. It has no image, video, bundled audio, or font assets; no third party packages; and no runtime network requests. It runs by opening `index.html` from disk. An optional owner-supplied local soundtrack can be played from `assets/audio/eternal-score.mp3`; that file is absent from this repository, so the default experience remains silent until one is supplied.
 
 ## Film timeline
 
@@ -34,6 +34,7 @@ Intervals overlap during transitions, so the complete film is 154.8 seconds, not
 - **Quality controls:** the governor adjusts internal render scale; `?scale=` fixes the base scale and disables adaptation, while `?adapt=0` disables the governor. Buffer size is capped by a 2.6 megapixel budget and device limits.
 - **Benchmarking:** `?bench` reports requestAnimationFrame pacing separately from synchronous render cost and labels known software renderers.
 - **Failure handling:** unavailable WebGL2, shader compile failures, framebuffer errors, and context loss are surfaced through the failure UI.
+- **Local soundtrack playback:** the playback panel supports play, pause, resume, restart, scrubbing, volume, mute, and silent preview. Audio starts only after a user action. A missing or unsupported local file leaves the visual film available silently. Audio follows the director's clock, uses a configurable start offset and fade envelope, and does not change playback speed. Benchmark, fixed-frame, loop, and probe modes do not initialize audio.
 
 ## Runtime and code map
 
@@ -49,24 +50,25 @@ Open `index.html` directly; no server or build step is required.
 | `src/shaders*.js` | GLSL sources, procedural shapes, and shader uniform contracts. |
 | `src/renderer.js` | WebGL2 setup, scene targets, uniforms, and post pass. |
 | `src/governor.js` | Pure adaptive render scale policy and query parsing. |
-| `src/bench.js`, `src/main.js` | Benchmark calculations, boot, clock, options, and animation loop. |
-| `src/overlay.js`, `styles.css` | Timed typography and fixed 2.39:1 presentation frame. |
+| `src/audio.js` | Local soundtrack config, audio context, fades, volume, and clock-following logic. |
+| `src/bench.js`, `src/main.js` | Benchmark calculations, boot, authoritative clock, playback controls, options, and animation loop. |
+| `index.html`, `src/overlay.js`, `styles.css` | Accessible playback panel, timed typography, and fixed 2.39:1 presentation frame. |
 
-Supported URL options include `?t=<seconds>` for a fixed film timestamp, `?act=<1–5>&t=<local seconds>`, `?loop`, `?scale=<number>`, `?adapt=0`, `?bench` or `?bench=<seconds>`, `?debug`, and `?probe`.
+Supported URL options include `?t=<seconds>` for a fixed film timestamp, `?act=<1–5>&t=<local seconds>`, `?loop`, `?scale=<number>`, `?adapt=0`, `?bench` or `?bench=<seconds>`, `?debug`, and `?probe`. Audio options are `?audio=<local relative path>`, `?offset=<seconds>`, `?fadein=<seconds>`, `?fadeout=<seconds>`, and `?duration=<seconds>`. The default audio source is `assets/audio/eternal-score.mp3`, with a 0 s offset, 2.5 s fade-in, 5 s fade-out, and the director's 154.8 s duration. `duration` is capped by the director's timeline; edit the act durations in `src/scenes/` to extend the film.
 
 ## Verification
 
 The repository provides two verification commands:
 
-- `npm test` runs the dependency free Node suite. It checks utilities, governor behavior, shader contracts, assets and offline constraints, opening behavior, and the five act timeline, transitions, cues, determinism, and scale independence.
-- `npm run browser-check` drives local headless Chromium over the DevTools protocol with SwiftShader. It checks shader compilation, opening animation probes, governor changes, resize and scale behavior, fixed timestamp renders across all five acts and transition boundaries, deterministic pixels, several viewport shapes, the Act I to II bloom midpoint brightness guard, the benchmark report, and the WebGL2 failure path. It writes visual stills under ignored `tests/shots/`.
+- `npm test` runs the dependency free Node suite. It checks utilities, governor behavior, shader contracts, asset/offline constraints, soundtrack config and fade math, missing-file handling, opening behavior, and the five act timeline, transitions, cues, determinism, and scale independence.
+- `npm run browser-check` drives local headless Chromium over the DevTools protocol with SwiftShader. It checks shader compilation, opening animation probes, governor changes, resize and scale behavior, fixed timestamp renders across all five acts and transition boundaries, deterministic pixels, several viewport shapes, the Act I to II bloom midpoint brightness guard, benchmark behavior, the WebGL2 failure path, and local audio with a generated 440 Hz WAV test tone. The audio checks cover a missing source, explicit-start behavior, pause/resume, restart, seeking, offset alignment, fade gain, mute, and silent preview. It writes screenshots and the temporary test tone under ignored `tests/shots/`.
 - In the current browser check, the bloom midpoint measured 70.2/255 against a regression limit of 90/255. The before/after contact sheet is `tests/shots/bloom-before-after.png`.
 
 The browser checks use software rendering. Their timings describe SwiftShader CPU rendering and are not hardware performance claims. Viewport checks include emulated portrait dimensions; they are not tests on a physical phone.
 
 ## Outstanding limitations
 
-- There is no audio implementation or audio integration point beyond the authoritative film clock. Audio remains future work.
+- No intended soundtrack has been supplied or tested. The audio controller and generated WAV test path are verified, but successful playback of the owner's actual MP3/WAV and its artistic sync still need confirmation with that file. Browser codec support varies; the app does not transcode files.
 - The exterior and terrace are intentionally stylized shader scenes with layered analytic silhouettes; they are not full polygonal 3D environments. The cathedral uses analytic ray geometry for depth.
 - The transition and screenshot checks establish rendering and timing behavior, not subjective visual quality on every display. The bloom is now localized and reduced, though it remains a pronounced bright beat by design.
 - The browser benchmark cannot establish real GPU performance. Hardware and physical mobile devices have not been measured here.

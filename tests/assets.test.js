@@ -33,17 +33,22 @@ test("index.html loads only local scripts and styles, and every one exists", () 
   assert.ok(!/<(img|video|audio|source|iframe|object|embed)\b/i.test(html));
 });
 
-test("runtime code makes no network requests and loads no external resources", () => {
+test("runtime code makes no network requests or loads external dependencies", () => {
   for (const f of runtime) {
     const code = fs.readFileSync(f, "utf8");
     assert.ok(!/https?:\/\/|\/\/cdn\./i.test(code), `${rel(f)} mentions a remote URL`);
-    assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts|\bimport\s*\(|@import|\burl\s*\(/.test(code), `${rel(f)} loads something`);
-    assert.ok(!/new\s+Image\b|createImageBitmap|HTMLImageElement|texImage2D|AudioContext|new\s+Audio\b|<img|<video|<audio/i.test(code), `${rel(f)} uses an image, video or audio asset`);
+    assert.ok(!/\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts|\bimport\s*\(|@import|\burl\s*\(/.test(code), `${rel(f)} loads a remote resource`);
+    assert.ok(!/new\s+Image\b|createImageBitmap|HTMLImageElement|texImage2D|<img|<video|<audio/i.test(code), `${rel(f)} uses an image or video asset`);
   }
 });
 
-test("no audio is implemented in milestone 1", () => {
-  for (const f of runtime) assert.ok(!/AudioContext|createOscillator|\.play\s*\(/.test(fs.readFileSync(f, "utf8")), rel(f));
+test("audio is optional, local-only, and not bundled", () => {
+  const code = fs.readFileSync(path.join(ROOT, "src", "audio.js"), "utf8");
+  assert.match(code, /assets\/audio\/eternal-score\.mp3/);
+  assert.match(code, /audio\.play\(\)/);
+  assert.match(code, /sourceValid/);
+  assert.ok(!/createOscillator|fetch\s*\(|XMLHttpRequest/.test(code));
+  assert.ok(!files.some(f => /\.(mp3|wav|ogg|flac|aac|m4a)$/i.test(f)), "a soundtrack or test recording must not ship");
 });
 
 test("no external libraries: no package dependencies", () => {

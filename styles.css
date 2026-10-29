@@ -49,6 +49,40 @@ body { display: grid; place-items: center; }
 .failed #frame { display: none; }
 .noscript { padding: 2rem; text-align: center; }
 
+/* Playback lives in the letterbox and stays separate from the film composition. */
+#controls {
+  position: fixed; z-index: 4; left: 50%; bottom: max(8px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  width: min(94vw, 820px); padding: .55rem .75rem .45rem; border: 1px solid rgba(150, 165, 196, .2);
+  background: linear-gradient(180deg, rgba(7, 10, 18, .88), rgba(3, 4, 8, .96));
+  box-shadow: 0 0 1.5rem rgba(0, 0, 0, .7); color: #c3cde0; font: 12px/1.2 var(--serif);
+}
+#controls[hidden] { display: none; }
+.transport-controls, .timeline-controls, .sound-controls { display: flex; align-items: center; gap: .5rem; }
+.transport-controls { justify-content: center; }
+.timeline-controls, .sound-controls { margin-top: .4rem; }
+#controls button {
+  appearance: none; border: 1px solid rgba(166, 181, 210, .27); border-radius: 2px; padding: .28rem .62rem;
+  background: rgba(17, 23, 37, .86); color: #d9dfeb; font: inherit; letter-spacing: .025em; cursor: pointer;
+}
+#controls button:hover:not(:disabled) { background: rgba(37, 45, 64, .96); border-color: rgba(184, 198, 223, .55); }
+#controls button:disabled { opacity: .42; cursor: default; }
+#controls button:focus-visible, #controls input:focus-visible { outline: 2px solid #c6b17d; outline-offset: 2px; }
+.silent-option { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+#controls input[type="range"] { accent-color: #b6a477; min-width: 3.5rem; }
+#film-seek { flex: 1; }
+#music-volume { width: 7.5rem; }
+#controls label, #film-time { white-space: nowrap; }
+#film-time { min-width: 5.8rem; text-align: right; font-variant-numeric: tabular-nums; }
+#audio-status { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #98a4ba; }
+@media (max-width: 620px) {
+  #controls { width: calc(100vw - 16px); padding: .45rem .5rem; font-size: 11px; }
+  .transport-controls { gap: .25rem; }
+  #controls button { padding: .28rem .38rem; }
+  #music-volume { width: 4rem; }
+  .sound-controls { gap: .35rem; }
+  #audio-status { max-width: 34vw; }
+}
+
 /* ?bench: a plain readable report over the picture */
 #benchPanel { position: fixed; inset: 1rem; z-index: 5; margin: 0; padding: 1rem 1.2rem; overflow: auto; white-space: pre-wrap; background: rgba(4, 6, 12, .92);
   border: 1px solid #2a3350; font: .8rem/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #cfd8ec; }
