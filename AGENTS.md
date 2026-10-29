@@ -1,8 +1,11 @@
 # ETERNAL: working notes
 
-- Run it: open `index.html` from disk (no server, no build). URL options: `?t=7.5` one frame, `?loop`, `?scale=0.5`, `?debug`, `?probe`, `?bench`.
-- Tests: `npm test` (node, no dependencies). Browser checks: `npm run browser-check` (headless Chromium from the Playwright cache, software WebGL2; writes `tests/shots/`).
+- Run it: open `index.html` from disk (no server, no build). URL options: `?t=7.5` one frame, `?loop`, `?scale=0.5` (fixes the base scale and turns the governor off), `?adapt=0` (governor off), `?bench` / `?bench=20` (measure this machine), `?debug` (window.__eternal), `?probe` (pixel probes for tests).
+- Tests: `npm test` (node, no dependencies). Browser checks: `npm run browser-check` (drives headless Chromium from the Playwright cache over CDP with software WebGL2: real animation loop, governor, resize, bench, screenshots in `tests/shots/`; `tests/cdp.mjs` is a dependency-free DevTools client).
 - Layout: `src/util.js` maths, `src/director.js` time and frames (pure), `src/scenes/opening.js` timeline + poem, `src/shaders.js` GLSL + uniform contract, `src/renderer.js` WebGL2, `src/overlay.js` DOM type, `src/main.js` boot.
 - Adding a uniform: declare it in `UNIFORMS` (shaders.js), in the GLSL, and return it from the scene's `uniforms(t)`; `tests/shaders.test.js` and `tests/director.test.js` fail if any of the three disagree.
 - When editing `src/shaders.js` with scripts, assert each replacement matches exactly once (an empty-string slice once corrupted the file).
 - `gl.finish()` does not block in Chrome; time GPU work with a 1-pixel `readPixels`. Headless timings are SwiftShader (CPU), not a GPU.
+- Render-scale governor (`src/governor.js`, pure, unit-tested): scale 0.5..1 on top of the base resolution. Down when the trimmed mean frame time over a window is above 24 ms (x0.88, or x0.75 above 40 ms), at least 2 s apart. Up (x1.08, a probe) only when within 1.15x of the display's own refresh interval and under 18.5 ms, at least 6 s apart; a probe that fails within 10 s reverts exactly, caps the scale for 120 s and doubles the up-dwell (max 60 s). First 30 frames and stalls over 250 ms are ignored. It does not guarantee 60 fps.
+- Buffer sizing order in `renderer.resize`: manual scale x dpr, then the 2.6 MP and hardware-side caps, then the governor's scale. Rescaling reallocates buffers only; shaders are compiled once.
+- `?bench` keeps two measurements apart: requestAnimationFrame frame times (what the user sees) and synchronous back-to-back render time (no vsync, read-back synced, includes JS). Software GL (SwiftShader/llvmpipe) is detected and flagged.

@@ -55,3 +55,7 @@ body { display: grid; place-items: center; }
 .noscript { padding: 2rem; text-align: center; }
 
 @media (prefers-reduced-motion: reduce) { #hint { animation: none; } }
+
+/* ?bench: a plain readable report over the picture */
+#benchPanel { position: fixed; inset: 1rem; z-index: 5; margin: 0; padding: 1rem 1.2rem; overflow: auto; white-space: pre-wrap; background: rgba(4, 6, 12, .92);
+  border: 1px solid #2a3350; font: .8rem/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #cfd8ec; }

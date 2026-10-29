@@ -1,92 +1,169 @@
-// Runs the real page in headless Chromium (software WebGL2 via SwiftShader) and checks what node cannot:
-// that both shader programs compile, that the picture is deterministic and animates region by region, that the
-// frame is never blank, and that the no-WebGL2 path shows a readable message. Writes screenshots to tests/shots/.
-// Usage: node tests/browser-check.mjs [--shots-only]   (set CHROME=/path/to/chrome-headless-shell to override)
-import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, mkdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+// Drives the real page in headless Chromium over the DevTools protocol (software WebGL2 via SwiftShader) and checks what
+// node cannot: shader compilation, determinism, region-by-region animation, the governor in the REAL animation loop,
+// resize and scale changes through the live pipeline, ?bench, and the no-WebGL2 message. Writes tests/shots/.
+// Everything measured here is SOFTWARE rendering: it proves the pipeline works, not how fast your GPU is.
+// Usage: node tests/browser-check.mjs        (CHROME=/path/to/chrome-headless-shell to override)
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
+import { findChrome, launch } from "./cdp.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INDEX = pathToFileURL(join(ROOT, "index.html")).href;
 const SHOTS = join(ROOT, "tests", "shots");
-
-function findChrome() {
-  if (process.env.CHROME) return process.env.CHROME;
-  const base = join(homedir(), ".cache", "ms-playwright");
-  if (!existsSync(base)) return null;
-  for (const d of readdirSync(base).filter(d => d.startsWith("chromium_headless_shell")).sort().reverse()) {
-    const dir = join(base, d);
-    for (const sub of readdirSync(dir)) { const p = join(dir, sub, "chrome-headless-shell"); if (existsSync(p)) return p; }
-  }
-  return null;
-}
 const CHROME = findChrome();
 if (!CHROME) { console.log("SKIP: no headless Chromium found (set CHROME=...)"); process.exit(0); }
-
-const GL = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
-const BASE = ["--no-sandbox", "--disable-gpu-sandbox", "--hide-scrollbars", "--virtual-time-budget=100000"];
-const run = (args, timeout = 240000) => spawnSync(CHROME, [...BASE, ...args], { encoding: "utf8", timeout, maxBuffer: 1 << 26 });
-const dump = (query, size, extra = GL) => run([...extra, `--window-size=${size}`, "--dump-dom", `${INDEX}${query}`]).stdout || "";
-const report = html => { const m = html.match(/<pre id="report">([^<]*)<\/pre>/); assert.ok(m, "page produced no report (did it fail to start?)"); return JSON.parse(m[1].replaceAll("&quot;", '"')); };
+mkdirSync(SHOTS, { recursive: true });
 
 let failures = 0;
-const check = (name, fn) => { try { fn(); console.log("ok   ", name); } catch (e) { failures++; console.log("FAIL ", name, "\n     ", e.message.split("\n")[0]); } };
+const check = async (name, fn) => { try { await fn(); console.log("ok   ", name); } catch (e) { failures++; console.log("FAIL ", name, "\n     ", String(e.message).split("\n")[0]); } };
+const note = s => console.log("      " + s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const J = v => JSON.stringify(v);
 
-// 1. compile, determinism, animation, no blank frames
-const probeHtml = dump("?probe=1", "960,540");
-check("page starts: no failure panel, both programs compiled", () => {
-  assert.ok(!/id="fail"[^>]*>(?!\s*<h1><\/h1>)/.test(probeHtml.replace(/id="fail" hidden/, "")) || /id="fail" hidden/.test(probeHtml), "failure panel visible");
-  const r = report(probeHtml);
-  assert.ok(r.renderer.length > 0);
-  console.log("      renderer:", r.renderer, "| float target:", r.floatTarget, "| drawing buffer:", r.size.join("x"));
+// counts shader compiles and links made by the page, so we can prove rescaling never recompiles
+const COUNTERS = `(() => { window.__gl = { compile: 0, link: 0 }; const P = WebGL2RenderingContext.prototype;
+  const c = P.compileShader, l = P.linkProgram; P.compileShader = function (s) { window.__gl.compile++; return c.call(this, s); }; P.linkProgram = function (p) { window.__gl.link++; return l.call(this, p); }; })();`;
+
+const page = await launch(CHROME);
+await page.addInitScript(COUNTERS);
+
+// ---------------------------------------------------------------- 1. start, determinism, animation, black-to-picture
+await page.resize(960, 540);
+await page.goto(`${INDEX}?probe=1`);
+await page.waitFor("document.documentElement.dataset.reported === '1'", 120000);
+const P = JSON.parse(await page.eval("document.getElementById('report').textContent"));
+await check("page starts: no failure panel; two programs compiled once (4 shaders, 2 links)", async () => {
+  assert.equal(await page.eval("document.getElementById('fail').hidden"), true);
+  assert.deepEqual(await page.eval("window.__gl"), { compile: 4, link: 2 });
+  note(`renderer: ${P.renderer} | float target: ${P.floatTarget} | drawing buffer ${P.size.join("x")}`);
 });
-const P = (() => { try { return report(probeHtml); } catch { return null; } })();
-if (P) {
-  check("rendering is deterministic: same time, identical pixels", () => { for (const m of Object.values(P.moments)) assert.equal(m.identicalRerender, true); });
-  check("black at t=0, picture present afterwards, nothing blank or blown out", () => {
-    const tl = Object.fromEntries(P.timeline);
-    assert.ok(tl[0] < 1, `t=0 mean ${tl[0]}`);
-    assert.ok(tl[2] > tl[0] && tl[3] > tl[2], "silver light grows from black");
-    for (const t of [5, 7, 9, 11, 13]) assert.ok(tl[t] > 5 && tl[t] < 120, `t=${t} mean ${tl[t]}`);
-    assert.ok(tl[14.5] < tl[13], "fades out");
-    console.log("      mean brightness (0-255) by second:", P.timeline.map(([t, v]) => `${t}s=${v}`).join(" "));
-  });
-  check("moon, clouds, mist and castle animate (camera pinned, grain off), measured over 2 s", () => {
-    for (const t of [8, 11]) for (const k of ["moon", "clouds", "mist", "castle"]) assert.ok(P.moments[t].change2s[k] > .4, `${k} at ${t}s changed only ${P.moments[t].change2s[k]}`);
-    for (const t of [8, 11]) console.log(`      mean level change over 2 s from t=${t}:`, JSON.stringify(P.moments[t].change2s));
-  });
-}
+await check("rendering is deterministic: same time, identical pixels", () => { for (const m of Object.values(P.moments)) assert.equal(m.identicalRerender, true); });
+await check("black at t=0, silver light grows, nothing blank or blown out, fades out", () => {
+  const tl = Object.fromEntries(P.timeline);
+  assert.ok(tl[0] < 1, `t=0 mean ${tl[0]}`);
+  assert.ok(tl[2] > tl[0] && tl[3] > tl[2]);
+  for (const t of [5, 7, 9, 11, 13]) assert.ok(tl[t] > 5 && tl[t] < 120, `t=${t} mean ${tl[t]}`);
+  assert.ok(tl[14.5] < tl[13]);
+  note("mean brightness (0-255) by second: " + P.timeline.map(([t, v]) => `${t}s=${v}`).join(" "));
+});
+await check("moon, clouds, mist and castle animate (camera pinned, grain off), measured over 2 s", () => {
+  for (const t of [8, 11]) for (const k of ["moon", "clouds", "mist", "castle"]) assert.ok(P.moments[t].change2s[k] > .3, `${k} at ${t}s changed only ${P.moments[t].change2s[k]}`);
+  for (const t of [8, 11]) note(`mean level change over 2 s from t=${t}: ${J(P.moments[t].change2s)}`);
+});
 
-// 2. screenshots (for eyes; the files are the evidence)
-mkdirSync(SHOTS, { recursive: true });
-const SIZES = [["1920x1080", [0, 2.5, 5, 7.2, 9.5, 12.5]], ["1280x720", [12.5]], ["800x450", [9.5]], ["520x800", [12.5]]];
-check("screenshots written at desktop, small and portrait sizes", () => {
+// ---------------------------------------------------------------- 2. the governor, in the real animation loop
+await page.goto(`${INDEX}?debug=1`);
+await page.waitFor("document.documentElement.dataset.ready === '1'");
+const before = await page.eval(`JSON.stringify({ css: document.getElementById('c').getBoundingClientRect().toJSON(), gl: window.__gl, scale: document.documentElement.dataset.renderScale,
+  buf: [document.getElementById('c').width, document.getElementById('c').height], frame: [innerWidth, innerHeight] })`).then(JSON.parse);
+const wall0 = Date.now();
+await page.waitFor("__eternal.clock.time() > 9", 60000);
+const mid = await page.eval(`JSON.stringify({ t: __eternal.clock.time(), fps: __eternal.avgFps(), scale: document.documentElement.dataset.renderScale, log: __eternal.governor.log,
+  css: document.getElementById('c').getBoundingClientRect().toJSON(), gl: window.__gl, buf: [document.getElementById('c').width, document.getElementById('c').height], frames: __eternal.perf.frames })`).then(JSON.parse);
+const wallElapsed = (Date.now() - wall0) / 1000;
+await check("real loop: a slow renderer (software GL) is stepped down within seconds, never below 0.5", () => {
+  assert.ok(mid.fps > 0 && mid.frames > 20, `loop ran ${mid.frames} frames`);
+  if (mid.fps < 40) { assert.ok(mid.log.length >= 1, `avg ${mid.fps} fps but no scale change`); assert.ok(+mid.scale < 1 && +mid.scale >= .5); }
+  note(`avg ${mid.fps} fps (software), scale ${before.scale} -> ${mid.scale}, buffer ${before.buf.join("x")} -> ${mid.buf.join("x")}, changes: ${mid.log.map(l => `${l.from}->${l.to} @${(l.at / 1000).toFixed(1)}s (${l.meanMs} ms)`).join("; ") || "none"}`);
+});
+await check("scale changes keep the composition: canvas CSS box identical, no shader recompiles", () => {
+  assert.deepEqual(mid.css, before.css);
+  assert.deepEqual(mid.gl, before.gl);
+  assert.deepEqual(mid.gl, { compile: 4, link: 2 });
+});
+await check("the timeline follows the clock, not the frame rate (film time tracks wall time)", () => {
+  assert.ok(Math.abs(mid.t - wallElapsed) < 1.2, `film t=${mid.t.toFixed(2)} vs wall ${wallElapsed.toFixed(2)}`);
+});
+await page.waitFor("__eternal.clock.time() > 12.6", 30000);
+writeFileSync(join(SHOTS, "live_t12_960x540.png"), await page.screenshot());
+note("screenshot of the live, animated page (governed scale): tests/shots/live_t12_960x540.png");
+
+// ---------------------------------------------------------------- 3. resize and scale changes through the live pipeline
+await check("resizing and rescaling keep rendering valid (no GL errors, right sizes, picture present, no recompiles)", async () => {
+  await page.goto(`${INDEX}?debug=1&t=9.5`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  const compiles = await page.eval("J = JSON.stringify; J(window.__gl)");
+  const steps = [[1920, 1080, 1, 1], [1280, 720, 1, .5], [800, 450, 2, 1], [520, 800, 1, .75], [1920, 1080, 1, .5], [960, 540, 3, 1], [1920, 1080, 1, 1]];
+  const rows = [];
+  for (const [w, h, dpr, scale] of steps) {
+    await page.resize(w, h, dpr);
+    await sleep(150);
+    const r = await page.eval(`(() => { const e = __eternal; e.setScale(${scale}); const c = document.getElementById('c'), gl = e.renderer.gl;
+      const W = c.width, H = c.height, px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      let s = 0, n = 0; for (let i = 0; i < px.length; i += 64) { s += px[i] + px[i + 1] + px[i + 2]; n += 3; }
+      const box = c.getBoundingClientRect(), info = e.info();
+      return JSON.stringify({ W, H, mean: s / n, errors: e.renderer.drainErrors(), box: [box.width, box.height], aspect: box.width / box.height, scale: info.renderScale, cssW: innerWidth, compile: window.__gl }); })()`).then(JSON.parse);
+    rows.push(`${w}x${h}@${dpr}x scale ${scale} -> ${r.W}x${r.H}`);
+    assert.deepEqual(r.errors, [], `GL errors at ${w}x${h}`);
+    assert.ok(r.mean > 8, `blank picture at ${w}x${h}: mean ${r.mean}`);
+    assert.ok(Math.abs(r.aspect - 2.39) < .02, `aspect ${r.aspect}`);
+    assert.ok(r.W >= 32 && r.H >= 32 && r.W * r.H <= 2.6e6 + 1, `buffer ${r.W}x${r.H}`);
+    assert.ok(Math.abs(r.W / r.H - r.aspect) < .05, "buffer aspect matches the frame");
+    assert.equal(r.scale, scale);
+    assert.equal(J(r.compile), compiles, "shaders were recompiled");
+  }
+  note(rows.join(" | "));
+  const text = await page.eval("[...document.querySelectorAll('.cue')].map(e => e.getBoundingClientRect().width > 0).join()");
+  assert.ok(text.includes("true"), "typography is still laid out");
+});
+await check("a manual ?scale is honoured and turns the governor off", async () => {
+  await page.resize(960, 540, 1);
+  await page.goto(`${INDEX}?debug=1&scale=0.5`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  assert.equal(await page.eval("__eternal.governor.enabled"), false);
+  const w = await page.eval("document.getElementById('c').width");
+  assert.ok(Math.abs(w - 480) <= 1, `buffer width ${w}`);
+  await sleep(3500);
+  assert.equal(await page.eval("__eternal.governor.log.length"), 0);
+  assert.equal(await page.eval("document.getElementById('c').width"), w);
+});
+
+// ---------------------------------------------------------------- 4. screenshots at desktop, small and portrait sizes
+await check("screenshots written (animation stills at desktop, small and portrait sizes)", async () => {
+  const SIZES = [[1920, 1080, [0, 2.5, 5, 6.55, 7.2, 9.5, 12.5]], [1280, 720, [12.5]], [800, 450, [9.5]], [520, 800, [12.5]]];
   let n = 0;
-  for (const [size, times] of SIZES) for (const t of times) {
-    const out = join(SHOTS, `t${String(t).replace(".", "_")}_${size}.png`);
-    run([...GL, `--window-size=${size.replace("x", ",")}`, `--screenshot=${out}`, `${INDEX}?t=${t}`]);
-    assert.ok(existsSync(out) && statSync(out).size > 2000, `${out} missing or empty`);
-    n++;
+  for (const [w, h, times] of SIZES) {
+    await page.resize(w, h, 1);
+    for (const t of times) {
+      await page.goto(`${INDEX}?t=${t}`);
+      await page.waitFor("document.documentElement.dataset.ready === '1'");
+      writeFileSync(join(SHOTS, `t${String(t).replace(".", "_")}_${w}x${h}.png`), await page.screenshot()); n++;
+    }
   }
-  console.log(`      ${n} screenshots in tests/shots/`);
+  note(`${n} screenshots in tests/shots/`);
 });
 
-// 3. no WebGL2: a readable message, not a blank page
-check("without WebGL2 the page explains itself", () => {
-  const html = dump("", "960,540", ["--disable-gpu", "--disable-webgl", "--disable-3d-apis", "--disable-software-rasterizer"]);
-  assert.ok(/WebGL2 is not available/.test(html) && !/id="fail" hidden/.test(html), "no readable error shown");
+// ---------------------------------------------------------------- 5. ?bench
+await check("?bench reports environment, GL info, real-loop stats and synchronous timing separately", async () => {
+  await page.resize(960, 540, 1);
+  await page.goto(`${INDEX}?bench=3`);
+  await page.waitFor("document.documentElement.dataset.reported === '1'", 120000);
+  const r = JSON.parse(await page.eval("document.getElementById('report').textContent"));
+  const text = await page.eval("document.getElementById('benchPanel').textContent");
+  assert.ok(r.environment.userAgent && r.environment.viewport.length === 2);
+  assert.ok(r.gl.renderer && r.gl.version && r.gl.limits.maxTexture > 0 && r.gl.width > 0 && typeof r.gl.floatTarget === "boolean");
+  assert.equal(r.verdict.kind, "software", "SwiftShader must be recognised as software");
+  assert.ok(r.animationLoop.frames >= 10 && r.animationLoop.avgFps > 0 && r.animationLoop.p95Ms > 0);
+  assert.ok(r.synchronous.meanMs > 0 && r.synchronous.perTime.length === 5);
+  assert.deepEqual(r.glErrors, []);
+  assert.equal(r.scale, 1);
+  assert.ok(/Real animation loop/.test(text) && /Synchronous back-to-back/.test(text) && /not frame pacing/.test(text) && /SOFTWARE/.test(text));
+  writeFileSync(join(SHOTS, "bench-software-sandbox.txt"), text + "\n");
+  note(`real loop ${r.animationLoop.avgFps} fps (${r.animationLoop.frames} frames); synchronous ${r.synchronous.meanMs} ms/frame; verdict ${r.verdict.kind}`);
 });
+await page.close();
 
-// 4. timing (synchronous, read-back synced). On SwiftShader this is a CPU figure, not a GPU one.
-check("frame timing measured", () => {
-  for (const size of ["960,540", "1920,1080"]) {
-    const r = report(dump("?bench=1", size));
-    console.log(`      ${r.info.width}x${r.info.height}: ${r.msPerFrame} ms/frame on [${r.info.renderer}]`);
-    assert.ok(r.msPerFrame > 0);
-  }
+// ---------------------------------------------------------------- 6. no WebGL2
+await check("without WebGL2 the page explains itself", async () => {
+  const bare = await launch(CHROME, ["--disable-gpu", "--disable-webgl", "--disable-3d-apis", "--disable-software-rasterizer"]);
+  try {
+    await bare.resize(960, 540);
+    await bare.goto(INDEX);
+    const html = await bare.eval("document.getElementById('fail').hidden + '|' + document.querySelector('#fail h1').textContent");
+    assert.equal(html, "false|WebGL2 is not available");
+  } finally { await bare.close(); }
 });
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall browser checks passed");

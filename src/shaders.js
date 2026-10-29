@@ -40,8 +40,8 @@ const float MOON_R = .27;
 const vec3 SILVER = vec3(.74, .80, .92);
 const vec3 WARM = vec3(1., .66, .28);
 const vec3 CRIMSON = vec3(.95, .17, .15);
-const vec2 CASTLE_O = vec2(.12, -.085);
-const float CASTLE_S = .33;
+const vec2 CASTLE_O = vec2(.12, -.10);
+const float CASTLE_S = .335;
 
 vec2 gQ;   // screen position: y from -.5 to .5, x scaled by the aspect ratio
 
@@ -139,26 +139,96 @@ float tower(vec2 p, float cx, float by, float hw, float hh, float spire) {
   float roof = sdCone(p - vec2(cx, by + 2. * hh), hw * 1.16, spire * 1.18);
   return min(min(b, corbel), roof);
 }
+// a pointed (two-centred) arch opening: base on y = 0, half width w, straight up to the springing height s
+float archD(vec2 p, float w, float s) {
+  vec2 q = vec2(abs(p.x), p.y);
+  float top = q.y > s ? length(q - vec2(-w, s)) - 2. * w : -1.;
+  return max(max(q.x - w, -q.y), top);
+}
+// a flying buttress: a quarter arc leaving a wall at (xt, yt) and landing R away and R lower
+float fly(vec2 p, float xt, float yt, float R, float side) {
+  vec2 q = vec2((p.x - xt) * side, p.y - (yt - R));
+  return max(abs(length(q) - R) - .013, max(-q.x, -q.y));
+}
+// a buttress pier, running down into the rock, with a small pinnacle
+float pier(vec2 p, float cx, float top, float hw) {
+  return min(sdBox(p - vec2(cx, (top - .15) * .5), vec2(hw, (top + .15) * .5)), sdCone(p - vec2(cx, top), hw * 1.3, hw * 4.5));
+}
+float sdTri(vec2 p, vec2 a, vec2 b, vec2 c) {
+  vec2 e0 = b - a, e1 = c - b, e2 = a - c, v0 = p - a, v1 = p - b, v2 = p - c;
+  vec2 q0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0., 1.), q1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0., 1.), q2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0., 1.);
+  float sg = sign(e0.x * e2.y - e0.y * e2.x);
+  vec2 d = min(min(vec2(dot(q0, q0), sg * (v0.x * e0.y - v0.y * e0.x)), vec2(dot(q1, q1), sg * (v1.x * e1.y - v1.y * e1.x))), vec2(dot(q2, q2), sg * (v2.x * e2.y - v2.y * e2.x)));
+  return -sqrt(d.x) * sign(d.y);
+}
+mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+
+// A gothic cathedral-castle in profile. Nothing is symmetrical on purpose: the west tower is taller than the east, the
+// nave and transept have their own roofs at their own heights, one outer tower is broken and leans, and buttresses
+// carry the weight from the walls to piers set into the rock. The central structure is the twin-towered west front.
 float castleSDF(vec2 p) {
-  float d = cbox(p, vec2(0., .13), vec2(.98, .13));                        // curtain wall
-  d = min(d, tower(p, .22, .24, .12, .30, .52));                           // the keep, tallest, with a slender spire
-  d = min(d, tower(p, .22 - .15, .74, .028, .06, .15));                    // its corner turrets
-  d = min(d, tower(p, .22 + .15, .74, .028, .06, .15));
-  d = min(d, tower(p, -.46, .24, .06, .38, .36));                          // the tall west tower
-  d = min(d, cbox(p, vec2(.62, .50), vec2(.08, .26)));                     // east tower, flat-topped
-  d = min(d, tower(p, .62 - .045, .76, .022, .05, .12));
-  d = min(d, sdBox(p - vec2(.62 + .05, .83), vec2(.012, .03)));
-  d = min(d, cbox(p, vec2(-.80, .42), vec2(.07, .18)));                    // a broken tower: no roof
-  d = max(d, -sdBox(p - vec2(-.77, .60), vec2(.034, .05)));
-  d = min(d, tower(p, .92, .24, .05, .17, .22));
-  d = min(d, cbox(p, vec2(-.20, .34), vec2(.24, .10)));                    // great hall
-  d = min(d, sdCone(p - vec2(-.20, .44), .245, .30));                       // its roof
-  d = min(d, tower(p, -.33, .44, .03, .05, .17));                          // gable turrets
-  d = min(d, tower(p, -.07, .44, .03, .05, .17));                       // its steep roof
-  d = min(d, tower(p, -.20 + .20, .44, .02, .05, .12));                    // roof ridge turret
-  d = min(d, tower(p, .40, .24, .045, .14, .24));                          // chapel tower between keep and east tower
-  d = min(d, sdBox(p - vec2(.22, 1.40), vec2(.004, .07)));                 // finials
-  d = min(d, sdBox(p - vec2(-.46, 1.17), vec2(.004, .06)));
+  vec2 m = vec2(abs(p.x), p.y);
+  // the plinth and uneven curtain walls, set into the rock
+  float d = sdBox(p - vec2(0., -.045), vec2(1.05, .105));
+  d = min(d, cbox(p, vec2(-.72, .12), vec2(.34, .12)));
+  d = min(d, cbox(p, vec2(.80, .09), vec2(.26, .09)));
+
+  // west front: a tall gabled face between two towers
+  d = min(d, sdBox(p - vec2(0., .38), vec2(.19, .38)));
+  d = min(d, sdCone(p - vec2(0., .76), .215, .42));
+  d = min(d, sdBox(m - vec2(.205, .22), vec2(.022, .22)));                // face buttresses
+  d = min(d, sdCone(m - vec2(.205, .44), .03, .10));
+  d = min(d, sdCone(p - vec2(0., 1.18), .012, .08));                      // gable finial
+
+  // twin towers, unequal. The taller carries an open belfry: the moon shows through it.
+  d = min(d, sdBox(p - vec2(-.34, .45), vec2(.075, .45)));
+  d = min(d, sdBox(p - vec2(-.34, .89), vec2(.095, .014)));
+  d = min(d, sdCone(p - vec2(-.34, .90), .092, .56));
+  d = min(d, sdCone(p - vec2(-.425, .90), .02, .13));
+  d = min(d, sdCone(p - vec2(-.255, .90), .02, .13));
+  d = max(d, -archD(p - vec2(-.34, .58), .03, .10));
+  d = min(d, sdBox(p - vec2(.34, .38), vec2(.075, .38)));
+  d = min(d, sdBox(p - vec2(.34, .75), vec2(.095, .014)));
+  d = min(d, sdCone(p - vec2(.34, .76), .092, .46));
+  d = min(d, sdCone(p - vec2(.255, .76), .02, .11));
+  d = min(d, sdCone(p - vec2(.425, .76), .02, .11));
+  d = max(d, -archD(p - vec2(.34, .50), .022, .07));
+
+  // the flèche: a slender spire over the crossing, rising behind the front
+  d = min(d, sdCone(p - vec2(.07, .92), .042, .50));
+  d = min(d, sdBox(p - vec2(.07, 1.44), vec2(.004, .05)));
+
+  // nave to the east in three layers: a low aisle under a lean-to roof, a higher clerestory under a steep gable,
+  // and a flying buttress arching over the aisle to a pier set in the rock
+  d = min(d, sdBox(p - vec2(.70, .17), vec2(.28, .17)));
+  d = min(d, sdTri(p, vec2(.74, .54), vec2(1.0, .33), vec2(.74, .33)));
+  d = min(d, sdBox(p - vec2(.58, .50), vec2(.16, .22)));
+  d = min(d, sdCone(p - vec2(.58, .72), .175, .38));
+  d = min(d, sdCone(p - vec2(.41, .72), .02, .12));
+  d = min(d, sdCone(p - vec2(.75, .72), .02, .12));
+  d = min(d, fly(p, .745, .66, .26, 1.));
+  d = min(d, pier(p, 1.005, .47, .028));
+
+  // transept to the west, lower, built the same way but not the same size
+  d = min(d, sdBox(p - vec2(-.70, .16), vec2(.26, .16)));
+  d = min(d, sdTri(p, vec2(-.76, .48), vec2(-.96, .32), vec2(-.76, .32)));
+  d = min(d, sdBox(p - vec2(-.62, .46), vec2(.15, .20)));
+  d = min(d, sdCone(p - vec2(-.62, .66), .165, .34));
+  d = min(d, sdCone(p - vec2(-.47, .66), .018, .10));
+  d = min(d, sdCone(p - vec2(-.77, .66), .018, .10));
+  d = min(d, fly(p, -.77, .58, .16, -1.));
+  d = min(d, pier(p, -.93, .46, .024));
+
+  // a ruined outer tower: it leans, and its top has been broken away
+  vec2 lp = rot(.05) * (p - vec2(-.98, 0.));
+  d = min(d, sdBox(lp - vec2(0., .34), vec2(.06, .34)));
+  d = max(d, -sdBox(rot(-.55) * (lp - vec2(.01, .72)), vec2(.09, .03)));
+
+  // an arcade of pointed arches in the walls
+  d = max(d, -archD(p - vec2(-.80, .07), .03, .06));
+  d = max(d, -archD(p - vec2(-.60, .07), .03, .06));
+  d = max(d, -archD(p - vec2(.60, .06), .03, .05));
+  d = max(d, -archD(p - vec2(.78, .06), .03, .05));
   return d;
 }
 // the rock the castle stands on: a plateau under the walls, narrowing downwards into a ragged pinnacle
@@ -195,15 +265,35 @@ vec3 windowRow(vec2 cp, float x0, float x1, float y, float s, float k, float aa)
   vec2 f = vec2(mod(cp.x - x0, s) - s * .5, cp.y - y);
   return windowAt(f * WIN_K, vec2(floor((cp.x - x0) / s), k), aa * WIN_K);
 }
+// the great west window (a tall lancet) and the rose above it: lit last, the warmest things in the picture
+vec3 greatWindow(vec2 cp, float aa) {
+  float on = smoothstep(.55, .85, uWindows);
+  if (on <= 0.) return vec3(0.);
+  vec2 q = cp - vec2(0., .20);
+  float lan = smoothstep(aa, -aa, archD(q, .052, .19));
+  lan *= 1. - smoothstep(.005, .002, min(abs(q.x), abs(abs(q.x) - .026) * step(.0, q.y - .08)));   // mullions
+  lan *= .65 + .5 * smoothstep(.0, .45, 1. - q.y * 1.4);
+  vec2 r = cp - vec2(0., .62);
+  float rl = length(r);
+  float rose = smoothstep(aa, -aa, rl - .062);
+  rose *= 1. - smoothstep(.005, .002, min(abs(r.x), abs(r.y)));
+  rose *= 1. - smoothstep(.005, .002, abs(rl - .032));
+  rose *= 1. - smoothstep(.005, .002, abs(abs(r.x) - abs(r.y)) * .7) * step(rl, .062);
+  float flick = .86 + .14 * sin(uTime * 1.3 + 2.) * (.7 + .3 * vnoise(vec2(uTime * 1.1, 3.)));
+  vec3 gold = mix(WARM, vec3(1., .80, .5), .3);
+  vec3 rosec = mix(gold, CRIMSON * .85, .55 * uCrimson);
+  float halo = exp(-max(archD(q, .052, .19), 0.) * 18.) * .10 + exp(-max(rl - .062, 0.) * 18.) * .12;
+  return (gold * lan * .85 + rosec * rose * .95 + gold * halo) * on * flick;
+}
 vec3 castleWindows(vec2 cp, float aa) {
-  vec3 w = windowColumn(cp, .22, .34, .86, .13, 1., aa);        // keep
-  w += windowColumn(cp, -.46, .36, .98, .14, 2., aa);           // west tower
-  w += windowColumn(cp, .62, .34, .70, .12, 3., aa);            // east tower
-  w += windowColumn(cp, -.80, .34, .54, .11, 4., aa);
-  w += windowColumn(cp, .40, .32, .56, .11, 5., aa);            // chapel tower
-  w += windowColumn(cp, .92, .34, .56, .11, 6., aa);
-  w += windowRow(cp, -.44, .04, .32, .10, 7., aa);              // great hall
-  w += windowRow(cp, -.88, .88, .125, .17, 8., aa);             // curtain wall
+  vec3 w = windowColumn(cp, -.34, .12, .60, .13, 1., aa);        // west tower, below the belfry
+  w += windowColumn(cp, .34, .12, .52, .12, 2., aa);              // east tower
+  w += windowRow(cp, .46, .72, .52, .10, 3., aa);                 // nave clerestory
+  w += windowRow(cp, .46, .94, .16, .12, 9., aa);                 // nave aisle
+  w += windowRow(cp, -.74, -.50, .46, .10, 4., aa);               // transept clerestory
+  w += windowRow(cp, -.92, -.48, .15, .12, 10., aa);              // transept aisle
+  w += windowColumn(cp, -.98, .14, .56, .13, 5., aa);             // the ruined tower
+  w += greatWindow(cp, aa);
   return w;
 }
 
@@ -240,7 +330,7 @@ void main() {
 
   // cloud density (needed before the moon is composited, since the clouds sit in front of it)
   vec2 pc = layerP(.42);
-  float cThr = mix(.74, .32, uCloud);
+  float cThr = mix(.74, .32, uCloud) + .20 * uMoon * (1. - smoothstep(.0, .46, r));   // an opening in the cloud around the moon
   float fldA = cloudRaw(pc, 1.);
   float cA = smoothstep(cThr - .12, cThr + .10, fldA) * smoothstep(-.28, .12, pc.y);
   float thick = clamp((fldA - cThr) * 3.2, 0., 1.);

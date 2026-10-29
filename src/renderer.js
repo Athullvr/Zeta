@@ -42,6 +42,7 @@
       "Try a current version of Chrome, Edge, Firefox or Safari, with hardware acceleration enabled.");
 
     // ---------- programs: compile everything first, then check, so the driver can work in parallel ----------
+    const compileStart = (typeof performance !== "undefined" ? performance.now() : 0);
     const sources = { scene: SH.SCENE_FRAG, post: SH.POST_FRAG };
     const pending = {};
     for (const name of Object.keys(sources)) {
@@ -63,6 +64,7 @@
       for (const [u, type] of Object.entries(SH.PROGRAM_UNIFORMS[name])) locs[u] = { loc: gl.getUniformLocation(p.prog, u), type };
       programs[name] = { prog: p.prog, locs };
     }
+    const compileMs = (typeof performance !== "undefined" ? performance.now() : 0) - compileStart;
     if (problems.length) throw new EternalError("shader-compile", "A shader failed to compile.", problems.join("\n\n"));
 
     const vao = gl.createVertexArray();
@@ -89,17 +91,37 @@
         throw new EternalError("framebuffer", "The graphics device could not create the offscreen render target.", `${w}x${h}, ${floatTarget ? "RGBA16F" : "RGBA8"}`);
     }
 
-    // Size the drawing buffer for a CSS box. maxPixels keeps big or dense screens affordable.
+    // Hardware limits on the drawing buffer. Both the offscreen texture and the canvas must fit.
+    const limits = (() => {
+      const vp = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+      return { maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE), maxRenderbuffer: gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), maxViewport: [vp[0], vp[1]] };
+    })();
+    const maxSide = Math.min(limits.maxTexture, limits.maxRenderbuffer, limits.maxViewport[0], limits.maxViewport[1]);
+
+    // Size the drawing buffer for a CSS box. The order matters:
+    //   1. base = the manual ?scale (default 1) times the device pixel ratio
+    //   2. the pixel budget (maxPixels) and the hardware side limit cap that, so a 4K screen is affordable
+    //   3. the governor's render scale multiplies the result, so lowering it always makes the buffer smaller
+    // The canvas is styled to fill its box, so none of this changes what is shown, only how sharp it is.
+    let renderScale = 1, lastCss = null;
     function resize(cssW, cssH, dpr = 1) {
+      lastCss = [cssW, cssH, dpr];
       const maxPixels = options.maxPixels || 2.6e6;
       let k = Math.max(.25, (options.scale || 1) * dpr);
       const px = cssW * cssH * k * k;
       if (px > maxPixels) k *= Math.sqrt(maxPixels / px);
-      const w = Math.max(32, Math.round(cssW * k)), h = Math.max(32, Math.round(cssH * k));
+      k = Math.min(k, maxSide / Math.max(cssW, cssH, 1));
+      k *= renderScale;
+      const w = Math.max(32, Math.min(maxSide, Math.round(cssW * k))), h = Math.max(32, Math.min(maxSide, Math.round(cssH * k)));
       if (w === W && h === H) return { width: W, height: H };
       W = canvas.width = w; H = canvas.height = h;
       allocTarget(w, h);
       return { width: W, height: H };
+    }
+    // Change only the render scale (the governor's job): buffers are reallocated, shaders are not touched.
+    function setScale(s) {
+      renderScale = Math.min(4, Math.max(.1, +s || 1));
+      return lastCss ? resize(lastCss[0], lastCss[1], lastCss[2]) : { width: W, height: H };
     }
 
     let warned = new Set();
@@ -135,16 +157,32 @@
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    const info = () => ({ width: W, height: H, floatTarget, programs: Object.keys(programs), renderer: debugRenderer() });
-    function debugRenderer() {
+    function debugInfo() {
       const ext = gl.getExtension("WEBGL_debug_renderer_info");
-      return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      return {
+        renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+        vendor: ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+        unmasked: !!ext,
+      };
     }
+    // GL errors since the last call (the browser keeps only one pending code per type, so this is a sample, not a log)
+    function drainErrors() {
+      const names = { [gl.INVALID_ENUM]: "INVALID_ENUM", [gl.INVALID_VALUE]: "INVALID_VALUE", [gl.INVALID_OPERATION]: "INVALID_OPERATION", [gl.OUT_OF_MEMORY]: "OUT_OF_MEMORY", [gl.INVALID_FRAMEBUFFER_OPERATION]: "INVALID_FRAMEBUFFER_OPERATION", [gl.CONTEXT_LOST_WEBGL]: "CONTEXT_LOST" };
+      const out = [];
+      for (let i = 0, e; i < 8 && (e = gl.getError()) !== gl.NO_ERROR; i++) out.push(names[e] || String(e));
+      return out;
+    }
+    const info = () => Object.assign({
+      width: W, height: H, renderScale, floatTarget, programs: Object.keys(programs), compileMs: +compileMs.toFixed(1),
+      shaderCompiles: Object.keys(programs).length,   // fixed at creation: resizing and rescaling never compile
+      version: gl.getParameter(gl.VERSION), shadingLanguage: gl.getParameter(gl.SHADING_LANGUAGE_VERSION), limits,
+      extensions: ["EXT_color_buffer_float", "OES_texture_float_linear", "KHR_parallel_shader_compile", "WEBGL_debug_renderer_info"].filter(n => gl.getSupportedExtensions().includes(n)),
+    }, debugInfo());
     const sink = new Uint8Array(4);
     function finish() { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, sink); }   // gl.finish() does not block in Chrome; a read-back does
 
     canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); if (options.onContextLost) options.onContextLost(); });
-    return { resize, render, info, finish, gl };
+    return { resize, setScale, render, info, finish, drainErrors, gl, get scale() { return renderScale; } };
   }
 
   const api = { createRenderer, formatShaderLog, EternalError };

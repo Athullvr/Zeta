@@ -88,3 +88,28 @@ test("the clock follows an injected time source and can seek and pause", () => {
   c.start(7); now = 10000;
   assert.equal(c.time(), 8);
 });
+
+test("deterministic timing: a frame depends only on t, not on how often or in what order frames were drawn", () => {
+  const d1 = createDirector([opening]), d2 = createDirector([opening]);
+  const marks = Array.from({ length: 91 }, (_, m) => m / 6);          // instants that both a 30 fps and a 144 fps loop would hit
+  const slow = new Map(), fast = new Map();
+  for (let m = 0; m < marks.length; m++) {                              // 30 fps loop, forward, drawing the in-between frames too
+    for (let k = 0; k < 5; k++) d1.frameAt(marks[m] + k / 30 - 1e-9 * k);
+    slow.set(m, d1.frameAt(marks[m]));
+  }
+  for (let m = marks.length - 1; m >= 0; m--) {                         // 144 fps loop, backwards
+    for (let k = 0; k < 24; k++) d2.frameAt(marks[m] - k / 144);
+    fast.set(m, d2.frameAt(marks[m]));
+  }
+  for (let m = 0; m < marks.length; m++) assert.deepEqual(fast.get(m), slow.get(m), `frame at t=${marks[m]}`);
+});
+
+test("the documented timeline is pinned: cue times, strikes and duration do not drift by accident", () => {
+  assert.equal(opening.duration, 15);
+  assert.deepEqual(opening.cues.map(c => [c.id, c.in, c.out || null]), [["title", [7.6, 10.6], null], ["poem", [10.2, 12], [13.6, 14.7]]]);
+  assert.deepEqual(opening.strikes.map(s => [s.at, s.strength]), [[6.5, .85], [12.3, .45]]);
+});
+
+test("the render scale is not part of the scene: no uniform depends on resolution", () => {
+  for (const name of Object.keys(director.frameAt(5).uniforms)) assert.ok(!/scale|res|dpr|pixel/i.test(name), name);
+});
