@@ -1,22 +1,35 @@
-// GLSL sources and the uniform contract. Two programs only:
-//   scene: draws the whole picture (sky, stars, moon, clouds, mountains, castle, mist, motes) into an offscreen texture
-//   post:  bloom from that texture's mip chain, tone map, grade, vignette, film grain, fade
+// GLSL sources and the uniform contract. Four programs, all compiled once at start and never again:
+//   scene:    the night exterior (sky, stars, moon, clouds, mountains, castle, mist, motes, storm and lightning): acts I, IV, V
+//   interior: the cathedral nave: act II
+//   terrace:  the ruined terrace: act III
+//   post:     bloom from the scene's mip chain, tone map, grade, vignette, film grain, fade, and the blend between two scenes
 // Every uniform used by a shader is listed in UNIFORMS with its type; the renderer and the tests both read this table.
+// (The exterior is called "scene" for historical reasons: it was the only scene in milestone 1.)
 (function (root) {
   "use strict";
+  const isNode = typeof module === "object" && module.exports;
+  const C = isNode ? require("./shaders-common.js") : root.ETERNAL.glslCommon;
+  const GI = isNode ? require("./shaders-interior.js") : root.ETERNAL.glslInterior;
+  const GT = isNode ? require("./shaders-terrace.js") : root.ETERNAL.glslTerrace;
 
   const UNIFORMS = {
     shared: { uRes: "vec2", uTime: "float" },                       // set by the renderer from the canvas and the frame
-    camera: { uCam: "vec4" },                                       // x, y, zoom, roll
+    camera: { uCam: "vec4" },                                       // exterior and terrace: x, y, zoom, roll. interior: x, eye height, dolly, pitch
     scene: {
       uLight: "float", uMoon: "float", uCloud: "float", uStars: "float", uCastle: "float", uWindows: "float",
       uMist: "float", uShafts: "float", uFlash: "float", uFlashX: "float", uCrimson: "float",
+      uDrift: "float", uStorm: "float", uBolt: "float", uBoltX: "float", uBoltSeed: "float", uGreat: "float",
     },
+    interior: GI.UNIFORMS,
+    terrace: GT.UNIFORMS,
     post: { uBloom: "float", uGrain: "float", uVignette: "float", uExposure: "float", uFade: "float" },
+    transition: { uMix: "float", uTrans: "float" },                 // set by the renderer from the director's transition
   };
   const PROGRAM_UNIFORMS = {
     scene: Object.assign({}, UNIFORMS.shared, UNIFORMS.camera, UNIFORMS.scene),
-    post: Object.assign({}, UNIFORMS.shared, UNIFORMS.post),
+    interior: Object.assign({}, UNIFORMS.shared, UNIFORMS.camera, UNIFORMS.interior),
+    terrace: Object.assign({}, UNIFORMS.shared, UNIFORMS.camera, UNIFORMS.terrace),
+    post: Object.assign({}, UNIFORMS.shared, UNIFORMS.post, UNIFORMS.transition),
   };
 
   const VERT = `#version 300 es
@@ -33,6 +46,7 @@ uniform vec2 uRes;
 uniform float uTime;
 uniform vec4 uCam;
 uniform float uLight, uMoon, uCloud, uStars, uCastle, uWindows, uMist, uShafts, uFlash, uFlashX, uCrimson;
+uniform float uDrift, uStorm, uBolt, uBoltX, uBoltSeed, uGreat;
 out vec4 fragColor;
 
 const vec2 MOON_C = vec2(.20, .165);
@@ -45,30 +59,9 @@ const float CASTLE_S = .335;
 
 vec2 gQ;   // screen position: y from -.5 to .5, x scaled by the aspect ratio
 
-// ---------- noise (hash without sin, so every GPU agrees) ----------
-float hash21(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
-vec2 hash22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
-float vnoise(vec2 p) {
-  vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
-  return mix(mix(hash21(i), hash21(i + vec2(1, 0)), f.x), mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), f.x), f.y);
-}
-const mat2 ROT = mat2(.8, .6, -.6, .8);
-float fbm(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 5; i++) { s += a * vnoise(p); p = ROT * p * 2.02 + 17.3; a *= .5; } return s; }
-float fbm3(vec2 p) { float a = .5, s = 0.; for (int i = 0; i < 3; i++) { s += a * vnoise(p); p = ROT * p * 2.02 + 17.3; a *= .5; } return s; }
-// jagged ridge profile, 0..1
-float ridge(float x, float seed) {
-  float h = 0., a = .5, f = 1.;
-  for (int i = 0; i < 5; i++) { h += a * (1. - abs(2. * vnoise(vec2(x * f, seed)) - 1.)); a *= .5; f *= 2.1; }
-  return h;
-}
-float craters(vec2 p) {
-  vec2 i = floor(p), f = fract(p); float md = 8.;
-  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-    vec2 g = vec2(float(x), float(y)); md = min(md, length(g + hash22(i + g) - f));
-  }
-  return md;
-}
-
+${C.NOISE}
+${C.GEOM}
+${C.SKY}
 // ---------- camera and depth: near layers move and grow more than far ones ----------
 vec2 layerP(float depth) {
   float z = mix(1., uCam.z, depth);
@@ -85,28 +78,9 @@ vec3 skyColor(vec2 p) {
   c += vec3(.045, .006, .010) * uCrimson * smoothstep(-.05, -.35, p.y);
   return c;
 }
-float starLayer(vec2 p, float scale, float thresh, float size) {
-  vec2 g = p * scale, id = floor(g), f = fract(g) - .5;
-  float h = hash21(id);
-  float d = length(f - (hash22(id + 7.) - .5) * .6);
-  float tw = .65 + .35 * sin(uTime * (1. + h * 3.) + h * 40.);
-  return step(thresh, h) * smoothstep(size, 0., d) * tw * (.5 + .5 * hash21(id + 3.));
-}
-vec3 moonSurface(vec2 d) {
-  vec2 n = d / MOON_R;
-  float z = sqrt(max(0., 1. - dot(n, n)));
-  float maria = smoothstep(.40, .60, fbm(n * 1.7 + 7.)) * .85 + smoothstep(.45, .75, fbm(n * 3.4 + 2.)) * .25;
-  float grain = fbm(n * 11.) - .5;
-  float c = craters(n * 3.6);
-  float pit = smoothstep(.12, .0, c) * .10;
-  float albedo = (.92 - .46 * maria) * (1. + .34 * grain) - pit;
-  float light = .68 + .32 * dot(vec3(n, z), normalize(vec3(-.4, .35, .85)));
-  return vec3(.84, .89, 1.) * albedo * light * pow(z, .26) * 1.0;
-}
-
 // ---------- clouds ----------
 float cloudRaw(vec2 p, float speed) {
-  vec2 w = vec2(uTime * .020 * speed, uTime * .004 * speed);
+  vec2 w = vec2(uDrift * .020 * speed, uDrift * .004 * speed);
   p = p * vec2(1.25, 2.6) + w;
   vec2 q = vec2(fbm(p + vec2(1.7, 9.2)), fbm(p + vec2(8.3, 2.8)));
   return fbm(p + 1.7 * q - w * .6);
@@ -114,7 +88,7 @@ float cloudRaw(vec2 p, float speed) {
 
 // ---------- mist: horizontal bands that drift at their own speed ----------
 float mistBand(vec2 p, float y0, float spread, float speed, float seed) {
-  float n = fbm3(vec2(p.x * 1.0 - uTime * speed, p.y * 3.6) + seed);
+  float n = fbm3(vec2(p.x * 1.0 - uDrift * speed, p.y * 3.6) + seed);
   float band = exp(-pow((p.y - y0) / spread, 2.));
   return smoothstep(.28, .84, n) * band;
 }
@@ -125,7 +99,6 @@ vec3 mistColor(vec2 p, float shaft) {
 }
 
 // ---------- the castle, in its own units: x centred, y up from the base of the walls ----------
-float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.)) + min(max(d.x, d.y), 0.); }
 // pointed roof: base on y = 0, half width hw, apex at height h
 float sdCone(vec2 p, float hw, float h) { p.x = abs(p.x); float k = h / hw; return max((k * p.x + p.y - h) / sqrt(1. + k * k), -p.y); }
 float cbox(vec2 p, vec2 c, vec2 h) {   // box with crenellations along its top edge
@@ -138,12 +111,6 @@ float tower(vec2 p, float cx, float by, float hw, float hh, float spire) {
   float corbel = sdBox(p - vec2(cx, by + 2. * hh - .012), vec2(hw * 1.2, .016));
   float roof = sdCone(p - vec2(cx, by + 2. * hh), hw * 1.16, spire * 1.18);
   return min(min(b, corbel), roof);
-}
-// a pointed (two-centred) arch opening: base on y = 0, half width w, straight up to the springing height s
-float archD(vec2 p, float w, float s) {
-  vec2 q = vec2(abs(p.x), p.y);
-  float top = q.y > s ? length(q - vec2(-w, s)) - 2. * w : -1.;
-  return max(max(q.x - w, -q.y), top);
 }
 // a flying buttress: a quarter arc leaving a wall at (xt, yt) and landing R away and R lower
 float fly(vec2 p, float xt, float yt, float R, float side) {
@@ -161,7 +128,6 @@ float sdTri(vec2 p, vec2 a, vec2 b, vec2 c) {
   vec2 d = min(min(vec2(dot(q0, q0), sg * (v0.x * e0.y - v0.y * e0.x)), vec2(dot(q1, q1), sg * (v1.x * e1.y - v1.y * e1.x))), vec2(dot(q2, q2), sg * (v2.x * e2.y - v2.y * e2.x)));
   return -sqrt(d.x) * sign(d.y);
 }
-mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
 // A gothic cathedral-castle in profile. Nothing is symmetrical on purpose: the west tower is taller than the east, the
 // nave and transept have their own roofs at their own heights, one outer tower is broken and leans, and buttresses
@@ -267,7 +233,7 @@ vec3 windowRow(vec2 cp, float x0, float x1, float y, float s, float k, float aa)
 }
 // the great west window (a tall lancet) and the rose above it: lit last, the warmest things in the picture
 vec3 greatWindow(vec2 cp, float aa) {
-  float on = smoothstep(.55, .85, uWindows);
+  float on = smoothstep(.55, .85, uWindows) * uGreat;
   if (on <= 0.) return vec3(0.);
   vec2 q = cp - vec2(0., .20);
   float lan = smoothstep(aa, -aa, archD(q, .052, .19));
@@ -307,7 +273,7 @@ float firLine(float x, float scale, float seed, float hmax) {
 
 // ---------- drifting motes ----------
 vec3 motes(vec2 p, float scale, float seed, float speed) {
-  vec2 g = p * scale + vec2(uTime * speed * .6, -uTime * speed * .25);
+  vec2 g = p * scale + vec2(uDrift * speed * .6, -uDrift * speed * .25);
   vec2 id = floor(g), f = fract(g);
   float h = hash21(id + seed);
   vec2 pos = .5 + .30 * sin(uTime * (.25 + h * .5) + hash22(id + seed) * 6.28);
@@ -317,12 +283,26 @@ vec3 motes(vec2 p, float scale, float seed, float speed) {
   return mix(SILVER, vec3(1., .74, .40), step(.8, hash21(id + seed + 9.))) * m;
 }
 
+// a forked bolt: a jagged line from the cloud to behind the ridge, only drawn while uBolt is up
+vec3 boltLight(vec2 p) {
+  float y = p.y, top = .62, bot = -.03, k = clamp((top - y) / (top - bot), 0., 1.);
+  float wob = (vnoise(vec2(y * 6., uBoltSeed)) - .5) * .10 + (vnoise(vec2(y * 26., uBoltSeed + 3.)) - .5) * .028;
+  float d = abs(p.x - (uBoltX + wob));
+  float inRange = step(bot, y) * step(y, top);
+  float core = smoothstep(.0035 * (1. - .5 * k), .0, d) * inRange;
+  float glow = exp(-d * 38.) * inRange * .22;
+  float yb = .26 - y, fork = step(0., yb) * step(yb, .30);
+  float xb = uBoltX + (vnoise(vec2(1.56, uBoltSeed)) - .5) * .10 + yb * (uBoltSeed > 5. ? -.32 : .32) + (vnoise(vec2(y * 30., uBoltSeed + 9.)) - .5) * .02;
+  float db = abs(p.x - xb);
+  return vec3(.80, .88, 1.) * (core + glow + (smoothstep(.0022, .0, db) * .6 + exp(-db * 50.) * .08) * fork);
+}
+
 void main() {
   gQ = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
 
   // sky
   vec2 pS = layerP(.15);
-  vec3 col = skyColor(pS) * uLight;
+  vec3 col = skyColor(pS) * uLight * (1. - .4 * uStorm);
   vec2 pm = layerP(.30);
   vec2 dm = pm - MOON_C;
   float r = length(dm);
@@ -344,7 +324,7 @@ void main() {
 
   // moon
   float halo = .55 * exp(-r * 4.2) + .30 * exp(-r * 10.) + .22 * exp(-pow(r / (MOON_R * 1.5), 3.));
-  vec3 moonCol = moonSurface(dm);
+  vec3 moonCol = moonSurface(dm, MOON_R);
   float disc = smoothstep(MOON_R, MOON_R - .003 - .06 * cA, r);   // seen through cloud, the rim goes soft
   col += SILVER * halo * uLight * uMoon * .55;
   col = mix(col, moonCol, disc * uMoon);
@@ -357,17 +337,19 @@ void main() {
   // clouds, lit from behind by the moon: silver edges, dark bellies
   float broad = exp(-r * 1.9) * (.35 + .65 * uMoon);
   float lit = clamp(broad * (1.15 - .85 * thick) * 1.0 + cA * (1. - cA) * 2.0 * broad + halo * .15 * (1. - thick), 0., 1.) * uLight;
-  vec3 cloudCol = mix(vec3(.030, .042, .078), vec3(.62, .70, .84), lit) * uLight + flashCol * pulse * lightAt * 1.1;
+  vec3 cloudCol = mix(vec3(.030, .042, .078) * (1. - .45 * uStorm), vec3(.62, .70, .84), lit * (1. - .35 * uStorm)) * uLight + flashCol * pulse * lightAt * 1.1;
   col = mix(col, cloudCol, cA * (.94 - .30 * (1. - thick)));
   vec3 wispCol = mix(vec3(.035, .048, .085), vec3(.58, .66, .80), clamp(halo * 1.3 + exp(-r * 1.6) * .3, 0., 1.)) * uLight + flashCol * pulse * lightAt * .5;
   col = mix(col, wispCol, cB);
   col += flashCol * uFlash * .045 * (1. - cA);
 
+  if (uBolt > .01) col += boltLight(layerP(.35)) * uBolt;
+
   // moonlight shafts: radial streaks from the moon, seen mostly through the mist
   vec2 ps = layerP(.40);
   vec2 ds = ps - MOON_C;
   vec2 dir = ds / max(length(ds), 1e-4);   // noise over the unit circle: periodic, so no seam behind the moon
-  float rays = pow(vnoise(dir * 3.2 + uTime * .03) * .6 + vnoise(dir * 8. + 5. - uTime * .02) * .4, 2.2) * exp(-length(ds) * 1.1) * uShafts;
+  float rays = pow(vnoise(dir * 3.2 + uDrift * .03) * .6 + vnoise(dir * 8. + 5. - uDrift * .02) * .4, 2.2) * exp(-length(ds) * 1.1) * uShafts;
   col += SILVER * rays * .16 * (1. - cA * .7);
 
   // far mountains
@@ -406,6 +388,19 @@ void main() {
   float moonSide = exp(-length(pk - MOON_C) * 2.2) * uMoon * uLight;
   float rim = smoothstep(-.02, 0., cd) * (1. - smoothstep(0., .01, cd));
   col = mix(col, stone + SILVER * rim * moonSide * .07, body);
+  if (uFlash > .02 && body > .01) {   // lightning reveals the masonry: lit faces, courses of stone, bright edges
+    vec2 e = vec2(.005, 0.);
+    vec2 g = vec2(castleSDF(cp + e.xy) - castleSDF(cp - e.xy), castleSDF(cp + e.yx) - castleSDF(cp - e.yx));
+    vec2 nrm = g / max(length(g), 1e-4);
+    float facing = clamp(dot(nrm, normalize(vec2(uFlashX * .6, .9))) * .5 + .5, 0., 1.);
+    vec2 cell = cp * vec2(15., 28.);
+    float row = floor(cell.y);
+    vec2 f = vec2(fract(cell.x + mod(row, 2.) * .5), fract(cell.y));
+    float joint = max(smoothstep(.09, .0, f.x), smoothstep(.12, .0, f.y));
+    float block = hash21(vec2(floor(cell.x + mod(row, 2.) * .5), row));
+    float edge = smoothstep(-.03, 0., cd);
+    col += flashCol * uFlash * (facing * (.14 + .12 * block) * (1. - .75 * joint) + edge * .22) * reveal * body;
+  }
   vec3 win = castleWindows(cp, pxl) * smoothstep(0., .08, -cd - .01) * reveal;
   col += win * (.85 + .5 * uCrimson * .2);
   float rimR = exp(-max(cragTop(cp.x) - cp.y, 0.) * 40.) * rock;
@@ -437,25 +432,50 @@ void main() {
   const POST_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D uScene;
+uniform sampler2D uSceneB;
 uniform vec2 uRes;
-uniform float uTime, uBloom, uGrain, uVignette, uExposure, uFade;
+uniform float uTime, uBloom, uGrain, uVignette, uExposure, uFade, uMix, uTrans;
 out vec4 fragColor;
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f); return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y); }
 vec3 aces(vec3 x) { return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }
+
+// bloom: only what is bright, read from blurred mip levels
+vec3 glow(sampler2D s, vec2 uv) {
+  vec3 b = max(textureLod(s, uv, 2.).rgb - .30, 0.) * .30;
+  b += max(textureLod(s, uv, 3.).rgb - .26, 0.) * .30;
+  b += max(textureLod(s, uv, 4.).rgb - .22, 0.) * .26;
+  b += max(textureLod(s, uv, 5.).rgb - .18, 0.) * .22;
+  b += max(textureLod(s, uv, 6.).rgb - .14, 0.) * .20;
+  return b;
+}
 
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
-  vec3 c = texture(uScene, uv).rgb;
 
-  // bloom: only what is bright, read from blurred mip levels
-  vec3 b = vec3(0.);
-  b += max(textureLod(uScene, uv, 2.).rgb - .30, 0.) * .30;
-  b += max(textureLod(uScene, uv, 3.).rgb - .26, 0.) * .30;
-  b += max(textureLod(uScene, uv, 4.).rgb - .22, 0.) * .26;
-  b += max(textureLod(uScene, uv, 5.).rgb - .18, 0.) * .22;
-  b += max(textureLod(uScene, uv, 6.).rgb - .14, 0.) * .20;
-  c += b * uBloom * vec3(.92, .96, 1.06);
+  // between two scenes: how much of each, and anything the transition adds on top
+  float wa = 1., wb = 0.;
+  vec3 add = vec3(0.);
+  if (uMix > 0.) {
+    if (uTrans < 1.5) {                       // 1: fog. The next scene condenses out of drifting fog, patch by patch.
+      float n = vn(uv * vec2(3., 2.) + uTime * .03) * .55 + vn(uv * vec2(8., 5.) - uTime * .02) * .30 + vn(uv * 17.) * .15;
+      wb = smoothstep(n - .16, n + .16, uMix * 1.32 - .16);
+      wa = 1. - wb;
+      add = vec3(.20, .25, .36) * pow(1. - abs(2. * uMix - 1.), 2.) * (.10 + .22 * vn(uv * 4. + uTime * .05));
+    } else if (uTrans < 2.5) {                // 2: bloom. The light swells until it is all there is, and the next scene is lit by it.
+      wb = smoothstep(.40, .60, uMix);
+      wa = 1. - wb;
+      add = vec3(.62, .70, .92) * exp(-pow((uMix - .5) * 3.4, 2.)) * (1.15 - .5 * length(uv - .5));
+    } else {                                  // 3: darkness. Fade to black, then up from black.
+      wa = 1. - smoothstep(0., .5, uMix);
+      wb = smoothstep(.5, 1., uMix);
+    }
+  }
+  vec3 c = vec3(0.), b = vec3(0.);
+  if (wa > 0.) { c += texture(uScene, uv).rgb * wa; b += glow(uScene, uv) * wa; }
+  if (wb > 0.) { c += texture(uSceneB, uv).rgb * wb; b += glow(uSceneB, uv) * wb; }
+  c += add + b * uBloom * vec3(.92, .96, 1.06);
 
   c = aces(c * uExposure);
 
@@ -478,7 +498,8 @@ void main() {
 }
 `;
 
-  const api = { UNIFORMS, PROGRAM_UNIFORMS, VERT, SCENE_FRAG, POST_FRAG };
+  const FRAGS = { scene: SCENE_FRAG, interior: GI.FRAG, terrace: GT.FRAG, post: POST_FRAG };
+  const api = { UNIFORMS, PROGRAM_UNIFORMS, VERT, SCENE_FRAG, POST_FRAG, FRAGS };
   if (typeof module === "object" && module.exports) module.exports = api;
   else (root.ETERNAL = root.ETERNAL || {}).shaders = api;
 })(typeof self !== "undefined" ? self : globalThis);

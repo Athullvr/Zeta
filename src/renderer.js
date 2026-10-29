@@ -43,7 +43,7 @@
 
     // ---------- programs: compile everything first, then check, so the driver can work in parallel ----------
     const compileStart = (typeof performance !== "undefined" ? performance.now() : 0);
-    const sources = { scene: SH.SCENE_FRAG, post: SH.POST_FRAG };
+    const sources = SH.FRAGS;                 // scene, interior, terrace, post: every program the film will ever use
     const pending = {};
     for (const name of Object.keys(sources)) {
       const vs = gl.createShader(gl.VERTEX_SHADER), fs = gl.createShader(gl.FRAGMENT_SHADER);
@@ -70,23 +70,24 @@
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
 
-    // ---------- offscreen target ----------
+    // ---------- offscreen targets: A for the picture (or the outgoing one), B for the incoming one during a transition ----------
     const floatTarget = !!gl.getExtension("EXT_color_buffer_float");
-    let tex = null, fbo = null, W = 0, H = 0;
-    function allocTarget(w, h) {
-      if (tex) gl.deleteTexture(tex);
-      if (fbo) gl.deleteFramebuffer(fbo);
+    const targets = [{ tex: null, fbo: null }, { tex: null, fbo: null }];
+    let W = 0, H = 0;
+    function allocTarget(t, w, h) {
+      if (t.tex) gl.deleteTexture(t.tex);
+      if (t.fbo) gl.deleteFramebuffer(t.fbo);
       const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
-      tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, tex);
+      t.tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t.tex);
       gl.texStorage2D(gl.TEXTURE_2D, levels, floatTarget ? gl.RGBA16F : gl.RGBA8, w, h);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      fbo = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      t.fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
         throw new EternalError("framebuffer", "The graphics device could not create the offscreen render target.", `${w}x${h}, ${floatTarget ? "RGBA16F" : "RGBA8"}`);
     }
@@ -115,7 +116,8 @@
       const w = Math.max(32, Math.min(maxSide, Math.round(cssW * k))), h = Math.max(32, Math.min(maxSide, Math.round(cssH * k)));
       if (w === W && h === H) return { width: W, height: H };
       W = canvas.width = w; H = canvas.height = h;
-      allocTarget(w, h);
+      dyn.uRes[0] = w; dyn.uRes[1] = h;
+      for (const t of targets) allocTarget(t, w, h);
       return { width: W, height: H };
     }
     // Change only the render scale (the governor's job): buffers are reallocated, shaders are not touched.
@@ -124,37 +126,56 @@
       return lastCss ? resize(lastCss[0], lastCss[1], lastCss[2]) : { width: W, height: H };
     }
 
-    let warned = new Set();
-    function apply(name, values) {
+    // Uniform setting without per-frame allocation: values come from up to three sources, first one that has the name wins.
+    const warned = new Set(), dyn = { uRes: [0, 0], uTime: 0, uMix: 0, uTrans: 0 };
+    function apply(name, a, b) {
       for (const [u, { loc, type }] of Object.entries(programs[name].locs)) {
-        const v = values[u];
+        let v = dyn[u];
+        if (v === undefined) v = a[u];
+        if (v === undefined && b) v = b[u];
         if (v === undefined) { if (!warned.has(u)) { warned.add(u); console.warn(`uniform ${u} has no value`); } continue; }
         if (loc !== null) setUniform(gl, loc, type, v);
       }
     }
+    // the post program's two samplers are bound to texture units 0 and 1 once, for good
+    gl.useProgram(programs.post.prog);
+    gl.uniform1i(gl.getUniformLocation(programs.post.prog, "uScene"), 0);
+    gl.uniform1i(gl.getUniformLocation(programs.post.prog, "uSceneB"), 1);
 
-    // frame: { t, uniforms }. Shared uniforms (uRes, uTime) come from the renderer, the rest from the scene.
+    // Draw one scene program into a target, then build its mip chain for the bloom.
+    function drawLayer(layer, target, fallbackT) {
+      const prog = programs[layer.program];
+      if (!prog) throw new EternalError("internal", `no such program: ${layer.program}`);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+      gl.viewport(0, 0, W, H);
+      gl.useProgram(prog.prog);
+      dyn.uTime = layer.t === undefined ? fallbackT : layer.t;
+      apply(layer.program, layer.uniforms);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindTexture(gl.TEXTURE_2D, target.tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
+    }
+
+    // frame: { t, uniforms, layers?, post?, transition? }. A plain { t, uniforms } frame is one exterior scene, as before.
+    // With layers, each is drawn to its own target (two only while a transition runs) and the post pass blends them.
     function render(frame) {
       if (!W) throw new EternalError("internal", "render() called before resize()");
-      const values = Object.assign({}, frame.uniforms, { uTime: frame.t });
+      const layers = frame.layers || [{ program: "scene", t: frame.t, uniforms: frame.uniforms }];
       gl.bindVertexArray(vao);
-
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.viewport(0, 0, W, H);
-      gl.useProgram(programs.scene.prog);
-      apply("scene", Object.assign({ uRes: [W, H] }, values));
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.generateMipmap(gl.TEXTURE_2D);
+      drawLayer(layers[0], targets[0], frame.t);
+      if (layers.length > 1) drawLayer(layers[1], targets[1], frame.t);
+      const tr = frame.transition && layers.length > 1 ? frame.transition : null;
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, W, H);
       gl.useProgram(programs.post.prog);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.uniform1i(gl.getUniformLocation(programs.post.prog, "uScene"), 0);
-      apply("post", Object.assign({ uRes: [W, H] }, values));
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets[0].tex);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, targets[layers.length > 1 ? 1 : 0].tex);
+      const last = layers[layers.length - 1];
+      dyn.uTime = last.t === undefined ? frame.t : last.t; dyn.uMix = tr ? tr.mix : 0; dyn.uTrans = tr ? tr.trans : 0;
+      apply("post", frame.post || frame.uniforms);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.activeTexture(gl.TEXTURE0);
     }
 
     function debugInfo() {
