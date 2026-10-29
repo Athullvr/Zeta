@@ -128,10 +128,10 @@
     const diff = (a, b, idx) => { let d = 0; for (const i of idx) d += Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]); return +(d / idx.length / 3).toFixed(3); };
     const mean = (a, idx) => { let d = 0; for (const i of idx) d += (a[i] + a[i + 1] + a[i + 2]) / 3; return +(d / idx.length).toFixed(2); };
     const out = { size: [W, H], renderer: renderer.info().renderer, floatTarget: renderer.info().floatTarget, moments: {} };
-    for (const t0 of [5, 8, 12]) {
-      const a = grab(t0), a2 = grab(t0), b = grab(t0 + .6), c3 = grab(t0 + 3);
-      const m = { identicalRerender: a.every((v, i) => v === a2[i]), change: {}, change3s: {}, brightness: {} };
-      for (const [k, r] of Object.entries(REGIONS)) { const idx = region(r); m.change[k] = diff(a, b, idx); m.change3s[k] = diff(a, c3, idx); m.brightness[k] = mean(a, idx); }
+    for (const t0 of [5, 8, 11]) {
+      const a = grab(t0), a2 = grab(t0), b = grab(t0 + .6), c3 = grab(t0 + 2);
+      const m = { identicalRerender: a.every((v, i) => v === a2[i]), change: {}, change2s: {}, brightness: {} };
+      for (const [k, r] of Object.entries(REGIONS)) { const idx = region(r); m.change[k] = diff(a, b, idx); m.change2s[k] = diff(a, c3, idx); m.brightness[k] = mean(a, idx); }
       out.moments[t0] = m;
     }
     // whole-film frame energy, to be sure no moment is blank or blown out

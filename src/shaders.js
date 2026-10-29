@@ -152,7 +152,9 @@ float castleSDF(vec2 p) {
   d = max(d, -sdBox(p - vec2(-.77, .60), vec2(.034, .05)));
   d = min(d, tower(p, .92, .24, .05, .17, .22));
   d = min(d, cbox(p, vec2(-.20, .34), vec2(.24, .10)));                    // great hall
-  d = min(d, sdCone(p - vec2(-.20, .44), .20, .56));                       // its steep roof
+  d = min(d, sdCone(p - vec2(-.20, .44), .245, .30));                       // its roof
+  d = min(d, tower(p, -.33, .44, .03, .05, .17));                          // gable turrets
+  d = min(d, tower(p, -.07, .44, .03, .05, .17));                       // its steep roof
   d = min(d, tower(p, -.20 + .20, .44, .02, .05, .12));                    // roof ridge turret
   d = min(d, tower(p, .40, .24, .045, .14, .24));                          // chapel tower between keep and east tower
   d = min(d, sdBox(p - vec2(.22, 1.40), vec2(.004, .07)));                 // finials
@@ -253,7 +255,7 @@ void main() {
   // moon
   float halo = .55 * exp(-r * 4.2) + .30 * exp(-r * 10.) + .22 * exp(-pow(r / (MOON_R * 1.5), 3.));
   vec3 moonCol = moonSurface(dm);
-  float disc = smoothstep(MOON_R, MOON_R - .003, r);
+  float disc = smoothstep(MOON_R, MOON_R - .003 - .06 * cA, r);   // seen through cloud, the rim goes soft
   col += SILVER * halo * uLight * uMoon * .55;
   col = mix(col, moonCol, disc * uMoon);
 
@@ -265,9 +267,9 @@ void main() {
   // clouds, lit from behind by the moon: silver edges, dark bellies
   float broad = exp(-r * 1.9) * (.35 + .65 * uMoon);
   float lit = clamp(broad * (1.15 - .85 * thick) * 1.0 + cA * (1. - cA) * 2.0 * broad + halo * .15 * (1. - thick), 0., 1.) * uLight;
-  vec3 cloudCol = mix(vec3(.030, .042, .078), vec3(.62, .70, .84), lit) * (.55 + .45 * uLight) + flashCol * pulse * lightAt * 1.1;
-  col = mix(col, cloudCol, cA * (.95 - .55 * disc * uMoon * (1. - thick)));
-  vec3 wispCol = mix(vec3(.035, .048, .085), vec3(.58, .66, .80), clamp(halo * 1.3 + exp(-r * 1.6) * .3, 0., 1.) * uLight) + flashCol * pulse * lightAt * .5;
+  vec3 cloudCol = mix(vec3(.030, .042, .078), vec3(.62, .70, .84), lit) * uLight + flashCol * pulse * lightAt * 1.1;
+  col = mix(col, cloudCol, cA * (.94 - .30 * (1. - thick)));
+  vec3 wispCol = mix(vec3(.035, .048, .085), vec3(.58, .66, .80), clamp(halo * 1.3 + exp(-r * 1.6) * .3, 0., 1.)) * uLight + flashCol * pulse * lightAt * .5;
   col = mix(col, wispCol, cB);
   col += flashCol * uFlash * .045 * (1. - cA);
 
@@ -369,7 +371,7 @@ void main() {
 
   // grade: shadows lean midnight blue, highlights stay silver
   float l = dot(c, vec3(.299, .587, .114));
-  c = mix(c * vec3(.90, .97, 1.10) + vec3(.0, .004, .012) * (1. - l), c, smoothstep(.0, .6, l));
+  c = mix(c * vec3(.90, .97, 1.10) + vec3(.0, .004, .012) * (1. - l) * smoothstep(.0, .02, l), c, smoothstep(.0, .6, l));
 
   // vignette, corrected for the wide aspect ratio
   vec2 d = (uv - .5) * vec2(uRes.x / uRes.y * .62, 1.);
