@@ -171,12 +171,7 @@
     }
 
     function playAt(t, options = {}) {
-      const nextTime = Math.max(0, Number.isFinite(t) ? t : 0);
-      const nextAudioTime = soundtrackTime(nextTime, cfg);
-      if (!audio.paused && Math.abs(Number(audio.currentTime || 0) - nextAudioTime) > .22) {
-        try { audio.pause(); } catch {}
-      }
-      filmTime = nextTime;
+      filmTime = Math.max(0, Number.isFinite(t) ? t : 0);
       if (Number.isFinite(options.duration)) filmDuration = Math.max(0, options.duration);
       silent = !!options.silent;
       intent = true; blocked = false; ended = false;
