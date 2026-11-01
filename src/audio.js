@@ -208,11 +208,28 @@
       if (context && context.state !== "running") {
         resumeContext().catch(() => {});
       }
+      // At the natural end, leave the media element alone so the track can emit `ended` instead of being cut off
+      // by a final director-clock correction of a few frames.
+      const target = soundtrackTime(filmTime, cfg);
+      if (filmTime >= filmDuration - .15 && Number.isFinite(audio.duration) && audio.duration - target <= .25) return;
       if (!starting && !blocked && audio.paused) activate();
       else if (!starting && !blocked && !audio.seeking) {
         const drift = soundtrackTime(filmTime, cfg) - Number(audio.currentTime || 0);
         if (audio.readyState >= 1 && Math.abs(drift) > .22) seekElement(filmTime);
       }
+    }
+
+    function finish() {
+      filmTime = filmDuration;
+      applyGain();
+      const remaining = Number(audio.duration) - soundtrackTime(filmDuration, cfg);
+      if (Number.isFinite(remaining) && remaining <= .25) {
+        publish("The picture has resolved; the soundtrack is finishing.");
+        return;
+      }
+      intent = false; starting = false;
+      try { audio.pause(); } catch {}
+      publish("Film finished.");
     }
 
     function setVolume(value) { volume = Math.min(1, Math.max(0, Number(value) || 0)); applyGain(); }
@@ -225,7 +242,7 @@
 
     return {
       config: cfg, audio,
-      playAt, pause, seek, sync, setVolume, setMuted, setSilent,
+      playAt, pause, seek, sync, finish, setVolume, setMuted, setSilent,
       get status() { return status; },
       get context() { return context; },
       get gain() { return gainNode ? gainNode.gain.value : audio.volume; },

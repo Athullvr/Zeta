@@ -9,7 +9,9 @@
   const { seg, smooth, smoother, lerp, keyframes, strike, bolt } = U;
 
   const ACT5_OFFSET = 32;                    // act V's local 0 is storm time 32
-  const END = 70;
+  // The supplied score is about 168.15 s; this calm tail brings the shared storm timeline to that endpoint.
+  // Act V starts at storm time 32, so the complete film ends at END + 84.8 = 168.15 s.
+  const END = 83.35;
 
   // intensity of the storm, 0..1
   const S = tg => tg < 32 ? .45 + .55 * smooth(seg(tg, 0, 14)) : 1 - smoother(seg(tg, 33, 52));
@@ -60,7 +62,8 @@
       uBolt: boltV, uBoltX: boltX, uBoltSeed: boltSeed,
       uGreat: lerp(.55, 1.3, s),
       uBloom: lerp(.5, .75, s), uGrain: .055, uVignette: lerp(.85, 1.05, s), uExposure: lerp(1, .92, s),
-      uFade: smooth(seg(tg, ACT5_OFFSET + 35.6, ACT5_OFFSET + 37.9)),
+      // Resolve over the final five seconds, aligned with the default soundtrack fade-out.
+      uFade: smooth(seg(tg, END - 5, END)),
     };
   }
 

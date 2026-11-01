@@ -15,9 +15,10 @@ const files = walk(ROOT);
 const rel = p => path.relative(ROOT, p);
 const runtime = files.filter(f => /\.(html|css|js)$/.test(f) && !rel(f).startsWith("tests" + path.sep));
 
-test("no image, video, audio, font or texture files ship with the project", () => {
-  const bad = files.filter(f => /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|tiff?|mp4|webm|mov|mkv|mp3|ogg|wav|flac|aac|m4a|woff2?|ttf|otf|ktx2?|dds|hdr|exr|glb|gltf|obj)$/i.test(f));
+test("the supplied soundtrack is the only shipped media asset", () => {
+  const bad = files.filter(f => /\.(png|jpe?g|gif|webp|avif|svg|ico|bmp|tiff?|mp4|webm|mov|mkv|ogg|wav|flac|aac|m4a|woff2?|ttf|otf|ktx2?|dds|hdr|exr|glb|gltf|obj)$/i.test(f));
   assert.deepEqual(bad.map(rel), []);
+  assert.deepEqual(files.filter(f => /\.(mp3|ogg|wav|flac|aac|m4a)$/i.test(f)).map(rel), ["assets/audio/eternal-score.mp3"]);
 });
 
 test("index.html loads only local scripts and styles, and every one exists", () => {
@@ -42,13 +43,13 @@ test("runtime code makes no network requests or loads external dependencies", ()
   }
 });
 
-test("audio is optional, local-only, and not bundled", () => {
+test("the bundled MP3 is optional at runtime, local-only, and never autoplayed", () => {
   const code = fs.readFileSync(path.join(ROOT, "src", "audio.js"), "utf8");
   assert.match(code, /assets\/audio\/eternal-score\.mp3/);
   assert.match(code, /audio\.play\(\)/);
   assert.match(code, /sourceValid/);
   assert.ok(!/createOscillator|fetch\s*\(|XMLHttpRequest/.test(code));
-  assert.ok(!files.some(f => /\.(mp3|wav|ogg|flac|aac|m4a)$/i.test(f)), "a soundtrack or test recording must not ship");
+  assert.ok(fs.statSync(path.join(ROOT, "assets", "audio", "eternal-score.mp3")).size > 1000000, "the supplied track must be present");
 });
 
 test("no external libraries: no package dependencies", () => {

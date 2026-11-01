@@ -24,9 +24,9 @@ test("local score config defaults to the supplied path and resolves an editable 
   const config = A.normalizeConfig();
   assert.equal(config.src, "assets/audio/eternal-score.mp3");
   assert.equal(config.sourceValid, true);
-  assert.equal(A.resolveDuration(config, 154.8), 154.8);
-  assert.equal(A.resolveDuration(A.normalizeConfig({ durationSeconds: 181 }), 154.8), 154.8);
-  assert.equal(A.resolveDuration(A.normalizeConfig({ durationSeconds: 120 }), 154.8), 120);
+  assert.equal(A.resolveDuration(config, 168.15), 168.15);
+  assert.equal(A.resolveDuration(A.normalizeConfig({ durationSeconds: 181 }), 168.15), 168.15);
+  assert.equal(A.resolveDuration(A.normalizeConfig({ durationSeconds: 120 }), 168.15), 120);
   assert.equal(A.soundtrackTime(12.5, A.normalizeConfig({ offsetSeconds: 17 })), 29.5);
   assert.equal(A.normalizeConfig({ src: "https://example.invalid/score.mp3" }).sourceValid, false);
 });
@@ -74,6 +74,33 @@ test("one explicit play creates one audio graph, starts at offset, and follows s
   assert.equal(audio.currentTime, 3, "restart returns to the configured soundtrack offset");
   assert.equal(controller.context.nodes, 1);
   assert.ok(states.includes("Soundtrack playing with the film."));
+});
+
+test("a suspended AudioContext is resumed, and a matching soundtrack may end naturally", async () => {
+  const audio = new FakeAudio(); audio.duration = 10;
+  const controller = A.createAudioController({ audio, AudioContext: FakeContext, config: { fadeOutSeconds: 1 } });
+  controller.playAt(0, { duration: 10 });
+  await flush();
+  controller.context.state = "suspended";
+  controller.sync(9.5, 10);
+  await flush();
+  assert.equal(controller.context.state, "running");
+  audio.currentTime = 9.9;
+  controller.sync(10, 10);
+  controller.finish();
+  assert.equal(audio.paused, false, "the matching track is allowed to reach its native end");
+  audio.emit("ended");
+  assert.match(controller.status, /passage has ended/);
+});
+
+test("a shorter configured film passage stops a longer soundtrack at the resolved visual ending", async () => {
+  const audio = new FakeAudio(); audio.duration = 70;
+  const controller = A.createAudioController({ audio, AudioContext: FakeContext });
+  controller.playAt(0, { duration: 60 });
+  await flush();
+  controller.finish();
+  assert.equal(audio.paused, true);
+  assert.match(controller.status, /Film finished/);
 });
 
 test("silent preview, volume and mute do not create duplicate playback", async () => {

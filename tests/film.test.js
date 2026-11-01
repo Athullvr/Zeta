@@ -15,10 +15,13 @@ const HANDOFFS = [
 
 test("the five acts form one 150–180 second film with deliberate overlaps", () => {
   assert.deepEqual(film.scenes.map(s => s.id), ["act1", "act2", "act3", "act4", "act5"]);
-  assert.deepEqual(film.scenes.map(s => s.duration), [28, 34, 34, 36, 38]);
+  const durations = film.scenes.map(s => s.duration);
+  assert.deepEqual(durations.slice(0, 4), [28, 34, 34, 36]);
+  assert.ok(Math.abs(durations[4] - 51.35) < 1e-9);
   assert.deepEqual(director.starts, [0, 24, 54, 84.8, 116.8]);
-  assert.deepEqual(director.ends, [28, 58, 88, 120.8, 154.8]);
-  assert.equal(director.duration, 154.8);
+  assert.deepEqual(director.ends.slice(0, 4), [28, 58, 88, 120.8]);
+  assert.ok(Math.abs(director.ends[4] - 168.15) < 1e-9);
+  assert.ok(Math.abs(director.duration - 168.15) < 1e-9);
   assert.equal(director.frameAt(director.duration).done, true);
 });
 
@@ -55,6 +58,19 @@ test("the storm handoff preserves identical uniforms across the shared sky", () 
   assert.equal(f.transition.kind, "continue");
   assert.equal(f.layers.length, 1);
   assert.equal(f.layers[0].sceneId, "act5");
+});
+
+test("Act V keeps moving through the extended quiet ending and fades exactly at the film duration", () => {
+  const finalStart = director.duration - 5;
+  const beforeFade = director.frameAt(finalStart);
+  const halfway = director.frameAt(finalStart + 2.5);
+  const ending = director.frameAt(director.duration);
+  assert.equal(beforeFade.post.uFade, 0);
+  assert.ok(halfway.post.uFade > .45 && halfway.post.uFade < .55);
+  assert.equal(ending.post.uFade, 1);
+  assert.ok(ending.done);
+  assert.notDeepEqual(director.frameAt(155).uniforms.uCam, director.frameAt(160).uniforms.uCam,
+    "the added quiet tail keeps the camera moving before the final fade");
 });
 
 test("all five acts return finite values matching their shader uniform contracts", () => {

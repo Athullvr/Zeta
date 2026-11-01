@@ -101,6 +101,13 @@
   function draw(t = clock.time()) {
     const visualTime = director.loop ? t : Math.min(playbackDuration, t);
     const frame = director.frameAt(visualTime, opts);
+    // A configured shorter passage should still resolve to black at its own end instead of freezing mid-scene.
+    if (!director.loop && playbackDuration < director.duration) {
+      const fadeDuration = Math.min(5, playbackDuration);
+      const fadeStart = playbackDuration - fadeDuration;
+      const shortenedFade = E.util.smooth(E.util.seg(visualTime, fadeStart, playbackDuration));
+      frame.post.uFade = Math.max(frame.post.uFade, shortenedFade);
+    }
     renderer.render(frame);
     overlay.update(frame, frame.post.uFade);
     if (audioController) audioController.sync(visualTime, playbackDuration);
@@ -124,7 +131,7 @@
     if ((!frame.done && clock.time() < playbackDuration) || director.loop) rafId = requestAnimationFrame(tick);
     else {
       clock.pause(); clock.seek(playbackDuration); paused = true; finished = true;
-      if (audioController) audioController.pause();
+      if (audioController) audioController.finish();
       updateControls();
     }
   }

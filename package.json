@@ -5,6 +5,7 @@
   "description": "ETERNAL: a procedural gothic-romantic cinematic poem in five acts.",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "browser-check": "node tests/browser-check.mjs"
+    "browser-check": "node tests/browser-check.mjs && node tests/soundtrack-check.mjs",
+    "soundtrack-check": "node tests/soundtrack-check.mjs"
   }
 }

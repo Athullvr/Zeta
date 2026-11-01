@@ -18,9 +18,9 @@ The director is the single source of film time. Scene uniforms, camera motion, l
 | II — The Memory | 24–58 s | 34 s | A receding cathedral nave, pointed arches, shafts of moonlight, dust, and a procedural rose window frame memories of a voice and name. | 4 s fog dissolve; Act III starts at 54 s. |
 | III — The Lost Beloved | 54–88 s | 34 s | A ruined moonlit terrace with arches, thorn growth, drifting petals, and a fleeting light shaped like an absent figure. | 3.2 s fade through darkness; Act IV starts at 84.8 s. |
 | IV — The Oath | 84.8–120.8 s | 36 s | The exterior castle returns under a gathering storm. Scheduled lightning reveals the stone as the camera rises toward the tower. | Act V starts at 116.8 s and shares the same storm clock and picture for a 4 s continuous handoff. |
-| V — Until Eternity | 116.8–154.8 s | 38 s | The storm subsides, the camera withdraws to a wide night view, the final verse and a quiet title fade to black. | Film ends at 154.8 s. |
+| V — Until Eternity | 116.8–168.15 s | 51.35 s | The storm subsides, the camera withdraws through a longer quiet night view, and the final title resolves to black with the soundtrack. | Film ends at about 168.15 s. |
 
-Intervals overlap during transitions, so the complete film is 154.8 seconds, not the sum of local act lengths. Transition progress and poetry cues are defined in the director and act/script data.
+Intervals overlap during transitions, so the complete film is about 168.15 seconds, not the sum of local act lengths. Act I–IV timings and transitions remain unchanged; Act V carries the extended quiet resolution. Transition progress and poetry cues are defined in the director and act/script data.
 
 ## Implemented experience
 
@@ -54,7 +54,7 @@ Open `index.html` directly; no server or build step is required.
 | `src/bench.js`, `src/main.js` | Benchmark calculations, boot, authoritative clock, playback controls, options, and animation loop. |
 | `index.html`, `src/overlay.js`, `styles.css` | Accessible playback panel, timed typography, and fixed 2.39:1 presentation frame. |
 
-Supported URL options include `?t=<seconds>` for a fixed film timestamp, `?act=<1–5>&t=<local seconds>`, `?loop`, `?scale=<number>`, `?adapt=0`, `?bench` or `?bench=<seconds>`, `?debug`, and `?probe`. Audio options are `?audio=<local relative path>`, `?offset=<seconds>`, `?fadein=<seconds>`, `?fadeout=<seconds>`, and `?duration=<seconds>`. The default audio source is `assets/audio/eternal-score.mp3`, with a 0 s offset, 2.5 s fade-in, 5 s fade-out, and the director's 154.8 s duration. `duration` is capped by the director's timeline; edit the act durations in `src/scenes/` to extend the film.
+Supported URL options include `?t=<seconds>` for a fixed film timestamp, `?act=<1–5>&t=<local seconds>`, `?loop`, `?scale=<number>`, `?adapt=0`, `?bench` or `?bench=<seconds>`, `?debug`, and `?probe`. Audio options are `?audio=<local relative path>`, `?offset=<seconds>`, `?fadein=<seconds>`, `?fadeout=<seconds>`, and `?duration=<seconds>`. The supplied soundtrack is bundled at `assets/audio/eternal-score.mp3`; it plays offline with a 0 s offset, 2.5 s fade-in, and 5 s fade-out by default. The director ends at about 168.15 s, matching the track. `duration` may shorten the passage; the visual also fades to black at a custom shorter endpoint.
 
 ## Verification
 

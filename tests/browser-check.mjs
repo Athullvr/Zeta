@@ -184,7 +184,9 @@ await check("all five acts and four transitions render at fixed film timestamps"
     [140, "act5", null, "film_140_quiet"],
     [149, "act5", null, "film_149_final_verse"],
     [152.4, "act5", null, "film_152_4_final_title"],
-    [154.8, "act5", null, "film_154_8_final_black"],
+    [163.15, "act5", null, "film_163_15_fade_start"],
+    [165.65, "act5", null, "film_165_65_fade_midpoint"],
+    [168.15, "act5", null, "film_168_15_final_black"],
   ];
   await page.resize(960, 540, 1);
   await page.goto(`${INDEX}?debug=1&t=0&scale=0.5`);
@@ -206,16 +208,18 @@ await check("all five acts and four transitions render at fixed film timestamps"
     assert.equal(r.transition, transition, `transition at t=${t}`);
     assert.deepEqual(r.errors, [], `WebGL errors at t=${t}`);
     if ([40, 70, 96, 112, 140, 149].includes(t)) assert.ok(r.mean > 1, `blank act at t=${t}: mean ${r.mean}`);
-    if (t === 154.8) assert.equal(r.done, true, "the last still is the completed ending fade");
+    if (t === 168.15) assert.equal(r.done, true, "the last still is the completed ending fade");
     seen.set(t, r);
     writeFileSync(join(SHOTS, `${name}_960x540.png`), await page.screenshot());
   }
-  assert.ok(seen.get(149).mean > seen.get(154.8).mean, "the ending fades toward black");
+  assert.ok(seen.get(149).mean > seen.get(163.15).mean, "the quiet ending is visible before its final fade");
+  assert.ok(seen.get(163.15).mean > seen.get(165.65).mean && seen.get(165.65).mean > seen.get(168.15).mean,
+    "the final five-second visual fade resolves smoothly to black");
   assert.ok(seen.get(26).mean < 90, `Act I→II bloom midpoint remains too pale: mean ${seen.get(26).mean}`);
   note(`Act I→II bloom midpoint mean brightness: ${seen.get(26).mean.toFixed(1)} / 255`);
 
   // A different sequence of seeks must not alter the picture at any sampled instant.
-  for (const t of [26, 40, 56, 70, 86.4, 96, 112, 116.8, 140, 149, 152.4, 154.8]) {
+  for (const t of [26, 40, 56, 70, 86.4, 96, 112, 116.8, 140, 149, 152.4, 163.15, 165.65, 168.15]) {
     const a = seen.get(t).hash;
     const b = await page.eval(`(() => { const e = __eternal, f = e.seek(${t}), c = document.getElementById('c'), gl = e.renderer.gl;
       const px = new Uint8Array(c.width * c.height * 4); gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -288,6 +292,21 @@ await check("a missing local soundtrack reports a soft silent fallback and never
   note("missing path handled without a WebGL failure screen; visual playback advanced silently.");
 });
 
+await check("a configured shorter duration resolves the picture to black at its own endpoint", async () => {
+  await page.goto(`${INDEX}?debug=1&duration=20&t=20`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  const r = await page.eval(`(() => {
+    const f = __eternal.seek(20), c = document.getElementById('c'), gl = __eternal.renderer.gl;
+    const px = new Uint8Array(c.width * c.height * 4); gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    let sum = 0, n = 0; for (let i = 0; i < px.length; i += 32) { sum += px[i] + px[i+1] + px[i+2]; n += 3; }
+    return JSON.stringify({ duration: __eternal.playbackDuration, fade: f.post.uFade, mean: sum / n });
+  })()`).then(JSON.parse);
+  assert.equal(r.duration, 20);
+  assert.equal(r.fade, 1);
+  assert.ok(r.mean < 1, `shortened film should resolve fully to black, mean ${r.mean}`);
+  note("custom ?duration=20 resolves the visual endpoint without freezing on an Act II frame.");
+});
+
 await check("a generated WAV follows the film clock through play, pause, resume, restart, seek, fades, mute and silent preview", async () => {
   const toneUrl = `tests/shots/${TONE_PATH.split(/[\\/]/).pop()}`;
   await page.goto(`${INDEX}?debug=1&audio=${encodeURIComponent(toneUrl)}&offset=0.4&fadein=4&fadeout=50&duration=60`);
@@ -323,6 +342,12 @@ await check("a generated WAV follows the film clock through play, pause, resume,
   await page.waitFor(`__eternal.clock.time() > ${frozen.t + .35}`, 10000);
   const resumed = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);
   assert.ok(Math.abs(resumed.audio - (.4 + resumed.t)) < .35, "resume stays aligned to the same clock");
+
+  await page.eval("__eternal.audioController.context.suspend()");
+  await page.waitFor("__eternal.audioController.context.state === 'running'", 10000);
+  const recovered = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, state: __eternal.audioController.context.state })").then(JSON.parse);
+  assert.equal(recovered.state, "running", "the live controller resumes a browser-suspended AudioContext");
+  assert.ok(Math.abs(recovered.audio - (.4 + recovered.t)) < .35, "audio remains aligned after context suspension");
 
   await page.eval("(() => { const s = document.getElementById('film-seek'); s.value = '2.5'; s.dispatchEvent(new Event('input', { bubbles: true })); })()");
   const sought = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);
