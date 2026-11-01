@@ -31,13 +31,14 @@ test("the report labels the two measurements apart and warns honestly", () => {
   const text = B.formatReport({
     environment: { userAgent: "UA", platform: "Linux", hardwareConcurrency: 8, deviceMemory: 8, devicePixelRatio: 2, viewport: [1440, 900], frame: [1440, 603] },
     gl: { renderer: "SwiftShader", vendor: "Google", version: "WebGL 2.0", shadingLanguage: "ES 3.00", floatTarget: true, extensions: ["EXT_color_buffer_float"], limits: { maxTexture: 8192, maxRenderbuffer: 8192, maxViewport: [8192, 8192] }, compileMs: 120, shaderCompiles: 2, width: 1440, height: 603 },
-    verdict: B.classifyRenderer("SwiftShader"), scale: .88, governor: "governor off during the benchmark",
+    verdict: B.classifyRenderer("SwiftShader"), scale: .88, effectiveRenderScale: .88,
+    governor: { enabled: false, initialScale: 1, finalScale: .88, min: .35, max: 1, changes: [], note: "disabled for fixed-scale measurements" },
     animationLoop: stats, synchronous: B.syncSummary([{ t: 2, ms: 5.04 }, { t: 8, ms: 9.96 }]), glErrors: [], warnings: ["Software rendering"],
   });
-  for (const must of ["Real animation loop", "requestAnimationFrame", "Synchronous back-to-back", "not frame pacing", "SOFTWARE", "1440x603", "render scale 0.88", "GL errors: none", "Software rendering", "not a pure GPU time"])
+  for (const must of ["Real animation loop", "requestAnimationFrame", "Synchronous back-to-back", "not frame pacing", "SOFTWARE", "1440x603", "render scale 0.88", "Governor", "Scale changes", "95th percentile", "99th", "1% low", "GL errors: none", "Software rendering", "not a pure GPU time"])
     assert.ok(text.includes(must), `report is missing "${must}"`);
   assert.ok(!/guarantee/i.test(text));
-  const few = B.formatReport({ environment: { userAgent: "", platform: "", viewport: [1, 1], frame: [1, 1] }, gl: { renderer: "x", version: "", shadingLanguage: "", extensions: [], limits: { maxViewport: [1, 1] }, width: 1, height: 1 }, verdict: B.classifyRenderer("x"), scale: 1, governor: "", animationLoop: { frames: 3 }, synchronous: B.syncSummary([{ t: 1, ms: 1 }]), glErrors: ["INVALID_OPERATION"], warnings: [] });
+  const few = B.formatReport({ environment: { userAgent: "", platform: "", viewport: [1, 1], frame: [1, 1] }, gl: { renderer: "x", version: "", shadingLanguage: "", extensions: [], limits: { maxViewport: [1, 1] }, width: 1, height: 1 }, verdict: B.classifyRenderer("x"), scale: 1, governor: { enabled: false, note: "off", changes: [] }, animationLoop: { frames: 3 }, synchronous: B.syncSummary([{ t: 1, ms: 1 }]), glErrors: ["INVALID_OPERATION"], warnings: [] });
   assert.match(few, /Too few frames/); assert.match(few, /INVALID_OPERATION/);
 });
 

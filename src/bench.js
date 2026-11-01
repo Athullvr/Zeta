@@ -52,7 +52,10 @@
     L.push(`Limits         texture ${r.gl.limits.maxTexture}, renderbuffer ${r.gl.limits.maxRenderbuffer}, viewport ${r.gl.limits.maxViewport.join("x")}`);
     L.push(`Shader setup   ${r.gl.compileMs} ms for ${r.gl.shaderCompiles} programs, once at start (the driver may finish compiling lazily at the first draw)`);
     L.push(`Viewport       ${e.viewport.join("x")} CSS px, devicePixelRatio ${e.devicePixelRatio}; frame ${e.frame.join("x")} CSS px`);
-    L.push(`Drawing buffer ${r.gl.width}x${r.gl.height} px (${(r.gl.width * r.gl.height / 1e6).toFixed(2)} MP), render scale ${r.scale.toFixed(2)}, ${r.governor}`);
+    const g = r.governor || { enabled: false, note: "not reported", changes: [] };
+    L.push(`Drawing buffer ${r.gl.width}x${r.gl.height} px (${(r.gl.width * r.gl.height / 1e6).toFixed(2)} MP), effective render scale ${r.effectiveRenderScale ?? r.scale}`);
+    L.push(`Governor       ${g.enabled ? `adaptive ${g.initialScale.toFixed(2)} -> ${g.finalScale.toFixed(2)}` : `off (${g.note})`}; limits ${g.min ?? "?"}..${g.max ?? "?"}`);
+    L.push(`Scale changes  ${g.changes && g.changes.length ? g.changes.map(c => `${c.from}->${c.to} (${c.reason}, ${c.meanMs} ms)`).join(", ") : "none during this measurement"}`);
     L.push("");
     L.push(`1. Real animation loop (requestAnimationFrame), ${a.frames} frames over ${a.seconds} s of the film`);
     if (a.frames < 10) L.push("   Too few frames: the tab was hidden, throttled or the page was not drawing. Re-run with the tab in front.");
@@ -67,6 +70,7 @@
     L.push(`   ${y.meanMs} ms per frame on average, worst moment ${y.worstMs} ms: ${y.perTime.map(p => `t=${p.t}s ${p.ms}`).join(", ")}`);
     L.push("   Draws frames one after another with a pixel read-back after each batch, so it ignores vsync. It is closer to raw render cost,");
     L.push("   but it also includes JavaScript and read-back overhead, so it is not a pure GPU time.");
+    L.push("   Compare small and maximized windows with the same browser, DPR and ?bench duration; use ?adapt=1 to inspect governor decisions.");
     L.push("");
     L.push(`GL errors: ${r.glErrors.length ? r.glErrors.join(", ") : "none"}`);
     if (r.warnings.length) L.push("Notes:", ...r.warnings.map(w => "  - " + w));

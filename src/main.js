@@ -55,15 +55,34 @@
   // Normal playback owns one local audio element. Still renders, loops and benchmarks never load or start audio.
   const controls = $("#controls"), controlsEnabled = fixedT === null && !BENCH && !Q.has("loop") && !Q.has("probe");
   const audioStatus = $("#audio-status");
+  const audioDiagnostics = $("#audio-diagnostics"), testAudioStatus = $("#test-audio-status");
+  function showAudioDiagnostics(d) {
+    if (!audioDiagnostics || !d) return;
+    audioDiagnostics.textContent = [
+      `File: ${d.source}`,
+      `Resolved URL: ${d.currentSrc}`,
+      `Load: ${d.load} | network: ${d.network}`,
+      `Playback: ${d.playback} | paused: ${d.paused} | ended: ${d.ended}`,
+      `Time: ${d.currentTime ?? "--"} s / ${d.duration ?? "unknown"} s | playback rate: ${d.playbackRate}`,
+      `HTMLAudioElement volume: ${d.volume} | muted: ${d.muted}`,
+      `AudioContext: ${d.audioContext}`,
+      `Audio graph: ${d.graph}`,
+      `Media/decode error: ${d.mediaError}`,
+      `Diagnostic tone: ${d.testTone} (${d.testTonePlayback})`,
+    ].join("\n");
+    if (testAudioStatus) testAudioStatus.textContent = `Diagnostic tone: ${d.testTone}`;
+  }
   let audioController = null;
   if (controlsEnabled) {
     const audioElement = new Audio();
     audioController = E.audio.createAudioController({
       audio: audioElement,
-      AudioContext: window.AudioContext || window.webkitAudioContext,
+      AudioCtor: window.Audio,
       config: audioConfig,
       onStatus: status => { audioStatus.textContent = status; },
+      onDiagnostics: showAudioDiagnostics,
     });
+    showAudioDiagnostics(audioController.diagnostics());
     controls.hidden = false;
   }
   const seekEl = $("#film-seek"), timeEl = $("#film-time");
@@ -75,7 +94,10 @@
   timeEl.textContent = `0:00 / ${formatTime(playbackDuration)}`;
 
   // The governor only runs in the live loop, never for stills, benchmarks or when the scale is set by hand.
-  const governor = E.governor.createGovernor({ enabled: scaleOpt.adapt && fixedT === null && !BENCH, min: .5, max: 1 });
+  const adaptiveBench = BENCH && Q.get("adapt") === "1";
+  const governor = E.governor.createGovernor({
+    enabled: scaleOpt.adapt && fixedT === null && (!BENCH || adaptiveBench), min: .35, max: 1,
+  });
   const publishScale = () => { document.documentElement.dataset.renderScale = renderer.scale.toFixed(2); };
 
   // ---------- layout: a 2.39:1 frame centred between black bars ----------
@@ -123,7 +145,7 @@
     if (perf.last) {
       const dt = now - perf.last;
       perf.dts.push(dt); if (perf.dts.length > 240) perf.dts.shift();
-      const s = governor.sample(dt, now);
+      const s = governor.sample(dt, now, { hidden: document.hidden });
       if (s !== null) { renderer.setScale(s); publishScale(); }
     }
     perf.last = now; perf.frames++;
@@ -184,6 +206,9 @@
       audioController.setMuted(next);
     });
     $("#silent-preview").addEventListener("change", e => audioController.setSilent(e.target.checked));
+    $("#test-audio").addEventListener("click", () => { audioController.playTestTone(); });
+    const audioDiagnosticsTimer = setInterval(() => showAudioDiagnostics(audioController.diagnostics()), 250);
+    addEventListener("pagehide", () => { clearInterval(audioDiagnosticsTimer); audioController.destroy(); }, { once: true });
   }
 
   if (fixedT !== null) { clock.seek(fixedT); draw(); document.documentElement.dataset.ready = "1"; }
@@ -201,17 +226,20 @@
   }
 
   // ---------- ?bench ----------
-  // Stage 1 plays short windows of the film in the real requestAnimationFrame loop (governor off, scale as set), one in each
+  // Stage 1 plays short windows of the film in the real requestAnimationFrame loop (governor off by default), one in each
   // act and one at the storm's climax, because the acts do not cost the same. Stage 2 renders frames back to back at the same
   // moments, synchronised with a read-back, which ignores vsync. The two are reported apart.
   const BENCH_AT = [12, 40, 70, 96, 112, 140];     // film seconds: act I, II, III, the storm gathering, the climax, act V
   function runBench() {
     const per = Math.min(20, Math.max(1, parseFloat(Q.get("bench")) || 4));
+    const useAdaptiveBench = Q.get("adapt") === "1" && governor.enabled;
+    const startScale = renderer.scale;
+    governor.reset();
     const warnings = [];
     if (document.hidden) warnings.push("The tab is hidden: the browser throttles requestAnimationFrame, so stage 1 will be wrong.");
     if (scaleOpt.manual) warnings.push(`Manual ?scale=${scaleOpt.manual} is in effect.`);
     const panel = document.createElement("pre");
-    panel.id = "benchPanel"; panel.textContent = `ETERNAL benchmark: sampling the real animation loop, ${per} s at each of ${BENCH_AT.length} places in the film. Keep this tab in front.`;
+    panel.id = "benchPanel"; panel.textContent = `ETERNAL benchmark: sampling the real animation loop, ${per} s at each of ${BENCH_AT.length} places in the film${useAdaptiveBench ? " with adaptive scaling" : " at fixed scale"}. Keep this tab in front.`;
     document.body.appendChild(panel);
 
     const windows = BENCH_AT.map(() => []), all = [];
@@ -219,7 +247,14 @@
     function loop(now) {
       if (!start) { start = now; last = 0; }
       const el = (now - start) / 1000;
-      if (last && el > .0) { const dt = now - last; if (windows[w].length || el > .1) windows[w].push(dt); }
+      if (last && el > .0) {
+        const dt = now - last;
+        if (windows[w].length || el > .1) windows[w].push(dt);
+        if (useAdaptiveBench) {
+          const next = governor.sample(dt, now, { hidden: document.hidden });
+          if (next !== null) { renderer.setScale(next); publishScale(); }
+        }
+      }
       last = now;
       draw(BENCH_AT[w] + el);
       if (el < per) requestAnimationFrame(loop);
@@ -254,7 +289,14 @@
             userAgent: navigator.userAgent, platform: navigator.platform, hardwareConcurrency: navigator.hardwareConcurrency, deviceMemory: navigator.deviceMemory || null,
             devicePixelRatio: devicePixelRatio, viewport: [innerWidth, innerHeight], frame: frameSize.slice(),
           },
-          gl, verdict, scale: renderer.scale, governor: "governor off during the benchmark",
+          gl, verdict, scale: renderer.scale,
+          governor: {
+            enabled: useAdaptiveBench, initialScale: startScale, finalScale: renderer.scale,
+            min: governor.limits.min, max: governor.limits.max,
+            changes: governor.log.map(c => ({ ...c })),
+            note: useAdaptiveBench ? "adaptive mode enabled with ?adapt=1" : "disabled for fixed-scale measurements; use ?adapt=1 to observe changes",
+          },
+          effectiveRenderScale: renderer.scale, drawingBuffer: [gl.width, gl.height],
           animationLoop, synchronous: E.bench.syncSummary(samples), glErrors: renderer.drainErrors(), warnings,
         };
         panel.textContent = E.bench.formatReport(result);

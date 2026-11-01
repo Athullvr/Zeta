@@ -26,10 +26,19 @@
     return out.join("\n");
   }
 
-  function setUniform(gl, loc, type, v) {
-    if (type === "float") gl.uniform1f(loc, v);
-    else if (type === "vec2") gl.uniform2f(loc, v[0], v[1]);
-    else if (type === "vec4") gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+  function setUniform(gl, slot, v) {
+    const { loc, type } = slot, cache = slot.cache;
+    if (type === "float") {
+      if (slot.last === v) return;
+      gl.uniform1f(loc, v); slot.last = v;
+    } else if (type === "vec2") {
+      if (cache[0] === v[0] && cache[1] === v[1]) return;
+      gl.uniform2f(loc, v[0], v[1]); cache[0] = v[0]; cache[1] = v[1];
+    } else if (type === "vec4") {
+      if (cache[0] === v[0] && cache[1] === v[1] && cache[2] === v[2] && cache[3] === v[3]) return;
+      gl.uniform4f(loc, v[0], v[1], v[2], v[3]);
+      cache[0] = v[0]; cache[1] = v[1]; cache[2] = v[2]; cache[3] = v[3];
+    }
     else throw new EternalError("internal", `unsupported uniform type ${type}`);
   }
 
@@ -61,7 +70,9 @@
       else if (!bad && !gl.getProgramParameter(p.prog, gl.LINK_STATUS)) { bad = true; problems.push(`${name} program failed to link:\n${gl.getProgramInfoLog(p.prog)}`); }
       if (bad) continue;
       const locs = {};
-      for (const [u, type] of Object.entries(SH.PROGRAM_UNIFORMS[name])) locs[u] = { loc: gl.getUniformLocation(p.prog, u), type };
+      for (const [u, type] of Object.entries(SH.PROGRAM_UNIFORMS[name])) {
+        locs[u] = { loc: gl.getUniformLocation(p.prog, u), type, last: NaN, cache: type === "vec2" ? new Float32Array(2).fill(NaN) : type === "vec4" ? new Float32Array(4).fill(NaN) : null };
+      }
       programs[name] = { prog: p.prog, locs, uniforms: Object.entries(locs) };
     }
     const compileMs = (typeof performance !== "undefined" ? performance.now() : 0) - compileStart;
@@ -72,9 +83,11 @@
 
     // ---------- offscreen targets: A for the picture (or the outgoing one), B for the incoming one during a transition ----------
     const floatTarget = !!gl.getExtension("EXT_color_buffer_float");
-    const targets = [{ tex: null, fbo: null }, { tex: null, fbo: null }];
-    let W = 0, H = 0;
+    // The transition's incoming scene is rendered at 0.67 resolution to avoid reserving a second full-size HDR target.
+    const targets = [{ tex: null, fbo: null, scale: 1 }, { tex: null, fbo: null, scale: .67 }];
+    let W = 0, H = 0, bloomQuality = 1;
     function allocTarget(t, w, h) {
+      if (t.width === w && t.height === h && t.tex && t.fbo) return;
       if (t.tex) gl.deleteTexture(t.tex);
       if (t.fbo) gl.deleteFramebuffer(t.fbo);
       const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
@@ -90,6 +103,7 @@
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
         throw new EternalError("framebuffer", "The graphics device could not create the offscreen render target.", `${w}x${h}, ${floatTarget ? "RGBA16F" : "RGBA8"}`);
+      t.width = w; t.height = h;
     }
 
     // Hardware limits on the drawing buffer. Both the offscreen texture and the canvas must fit.
@@ -114,10 +128,11 @@
       k = Math.min(k, maxSide / Math.max(cssW, cssH, 1));
       k *= renderScale;
       const w = Math.max(32, Math.min(maxSide, Math.round(cssW * k))), h = Math.max(32, Math.min(maxSide, Math.round(cssH * k)));
+      bloomQuality = dyn.uBloomQuality = k < .55 ? .25 : k < .85 ? .6 : 1;
       if (w === W && h === H) return { width: W, height: H };
       W = canvas.width = w; H = canvas.height = h;
       dyn.uRes[0] = w; dyn.uRes[1] = h;
-      for (const t of targets) allocTarget(t, w, h);
+      for (const t of targets) allocTarget(t, Math.max(32, Math.round(w * t.scale)), Math.max(32, Math.round(h * t.scale)));
       return { width: W, height: H };
     }
     // Change only the render scale (the governor's job): buffers are reallocated, shaders are not touched.
@@ -127,15 +142,15 @@
     }
 
     // Uniform setting without per-frame allocation: values come from up to three sources, first one that has the name wins.
-    const warned = new Set(), dyn = { uRes: [0, 0], uTime: 0, uMix: 0, uTrans: 0 };
+    const warned = new Set(), dyn = { uRes: [0, 0], uTime: 0, uMix: 0, uTrans: 0, uBloomQuality: 1 };
     function apply(name, a, b) {
       for (const [u, slot] of programs[name].uniforms) {
-        const { loc, type } = slot;
+        const { loc } = slot;
         let v = dyn[u];
         if (v === undefined) v = a[u];
         if (v === undefined && b) v = b[u];
         if (v === undefined) { if (!warned.has(u)) { warned.add(u); console.warn(`uniform ${u} has no value`); } continue; }
-        if (loc !== null) setUniform(gl, loc, type, v);
+        if (loc !== null) setUniform(gl, slot, v);
       }
     }
     // the post program's two samplers are bound to texture units 0 and 1 once, for good
@@ -144,36 +159,45 @@
     gl.uniform1i(gl.getUniformLocation(programs.post.prog, "uSceneB"), 1);
 
     // Draw one scene program into a target, then build its mip chain for the bloom.
-    function drawLayer(layer, target, fallbackT) {
-      const prog = programs[layer.program];
-      if (!prog) throw new EternalError("internal", `no such program: ${layer.program}`);
+    function drawNamed(programName, time, uniforms, target) {
+      const prog = programs[programName];
+      if (!prog) throw new EternalError("internal", `no such program: ${programName}`);
       gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
-      gl.viewport(0, 0, W, H);
+      gl.viewport(0, 0, target.width, target.height);
       gl.useProgram(prog.prog);
-      dyn.uTime = layer.t === undefined ? fallbackT : layer.t;
-      apply(layer.program, layer.uniforms);
+      dyn.uRes[0] = target.width; dyn.uRes[1] = target.height;
+      dyn.uTime = time;
+      apply(programName, uniforms);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindTexture(gl.TEXTURE_2D, target.tex);
       gl.generateMipmap(gl.TEXTURE_2D);
+    }
+    function drawLayer(layer, target, fallbackT) {
+      drawNamed(layer.program, layer.t === undefined ? fallbackT : layer.t, layer.uniforms, target);
     }
 
     // frame: { t, uniforms, layers?, post?, transition? }. A plain { t, uniforms } frame is one exterior scene, as before.
     // With layers, each is drawn to its own target (two only while a transition runs) and the post pass blends them.
     function render(frame) {
       if (!W) throw new EternalError("internal", "render() called before resize()");
-      const layers = frame.layers || [{ program: "scene", t: frame.t, uniforms: frame.uniforms }];
+      const layers = frame.layers;
       gl.bindVertexArray(vao);
-      drawLayer(layers[0], targets[0], frame.t);
-      if (layers.length > 1) drawLayer(layers[1], targets[1], frame.t);
-      const tr = frame.transition && layers.length > 1 ? frame.transition : null;
+      let lastTime = frame.t;
+      if (layers && layers.length) {
+        drawLayer(layers[0], targets[0], frame.t);
+        if (layers.length > 1) drawLayer(layers[1], targets[1], frame.t);
+        const last = layers[layers.length - 1];
+        lastTime = last.t === undefined ? frame.t : last.t;
+      } else drawNamed("scene", frame.t, frame.uniforms, targets[0]);
+      const tr = frame.transition && layers && layers.length > 1 ? frame.transition : null;
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, W, H);
       gl.useProgram(programs.post.prog);
+      dyn.uRes[0] = W; dyn.uRes[1] = H;
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, targets[0].tex);
-      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, targets[layers.length > 1 ? 1 : 0].tex);
-      const last = layers[layers.length - 1];
-      dyn.uTime = last.t === undefined ? frame.t : last.t; dyn.uMix = tr ? tr.mix : 0; dyn.uTrans = tr ? tr.trans : 0;
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, targets[layers && layers.length > 1 ? 1 : 0].tex);
+      dyn.uTime = lastTime; dyn.uMix = tr ? tr.mix : 0; dyn.uTrans = tr ? tr.trans : 0;
       apply("post", frame.post || frame.uniforms);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.activeTexture(gl.TEXTURE0);
@@ -195,7 +219,9 @@
       return out;
     }
     const info = () => Object.assign({
-      width: W, height: H, renderScale, floatTarget, programs: Object.keys(programs), compileMs: +compileMs.toFixed(1),
+      width: W, height: H, renderScale, bloomQuality,
+      transitionTarget: [targets[1].width || 0, targets[1].height || 0],
+      floatTarget, programs: Object.keys(programs), compileMs: +compileMs.toFixed(1),
       shaderCompiles: Object.keys(programs).length,   // fixed at creation: resizing and rescaling never compile
       version: gl.getParameter(gl.VERSION), shadingLanguage: gl.getParameter(gl.SHADING_LANGUAGE_VERSION), limits,
       extensions: ["EXT_color_buffer_float", "OES_texture_float_linear", "KHR_parallel_shader_compile", "WEBGL_debug_renderer_info"].filter(n => gl.getSupportedExtensions().includes(n)),

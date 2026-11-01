@@ -29,7 +29,8 @@
     scene: Object.assign({}, UNIFORMS.shared, UNIFORMS.camera, UNIFORMS.scene),
     interior: Object.assign({}, UNIFORMS.shared, UNIFORMS.camera, UNIFORMS.interior),
     terrace: Object.assign({}, UNIFORMS.shared, UNIFORMS.camera, UNIFORMS.terrace),
-    post: Object.assign({}, UNIFORMS.shared, UNIFORMS.post, UNIFORMS.transition),
+    // uBloomQuality is a renderer-owned dynamic quality tier; film scenes do not set it.
+    post: Object.assign({}, UNIFORMS.shared, UNIFORMS.post, { uBloomQuality: "float" }, UNIFORMS.transition),
   };
 
   const VERT = `#version 300 es
@@ -434,7 +435,7 @@ precision highp float;
 uniform sampler2D uScene;
 uniform sampler2D uSceneB;
 uniform vec2 uRes;
-uniform float uTime, uBloom, uGrain, uVignette, uExposure, uFade, uMix, uTrans;
+uniform float uTime, uBloom, uBloomQuality, uGrain, uVignette, uExposure, uFade, uMix, uTrans;
 out vec4 fragColor;
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -443,6 +444,15 @@ vec3 aces(vec3 x) { return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) 
 
 // bloom: only what is bright, read from blurred mip levels
 vec3 glow(sampler2D s, vec2 uv) {
+  if (uBloomQuality < .4) {
+    return max(textureLod(s, uv, 4.).rgb - .22, 0.) * .42
+      + max(textureLod(s, uv, 6.).rgb - .14, 0.) * .34;
+  }
+  if (uBloomQuality < .75) {
+    return max(textureLod(s, uv, 2.).rgb - .30, 0.) * .38
+      + max(textureLod(s, uv, 4.).rgb - .22, 0.) * .32
+      + max(textureLod(s, uv, 6.).rgb - .14, 0.) * .24;
+  }
   vec3 b = max(textureLod(s, uv, 2.).rgb - .30, 0.) * .30;
   b += max(textureLod(s, uv, 3.).rgb - .26, 0.) * .30;
   b += max(textureLod(s, uv, 4.).rgb - .22, 0.) * .26;

@@ -30,8 +30,14 @@
       <label for="music-volume">Music volume</label>
       <input id="music-volume" type="range" min="0" max="1" step="0.01" value="0.72">
       <button id="mute-music" type="button" aria-pressed="false">Mute</button>
+      <button id="test-audio" type="button" title="Play a short tone through the browser's native audio output">TEST AUDIO (diagnostic)</button>
       <span id="audio-status" role="status" aria-live="polite">Checking for the local soundtrack…</span>
     </div>
+    <details id="audio-debug">
+      <summary>Temporary audio diagnostics</summary>
+      <pre id="audio-diagnostics" aria-live="polite">Waiting for audio diagnostics…</pre>
+      <span id="test-audio-status" role="status" aria-live="polite">Test tone has not been played.</span>
+    </details>
   </section>
 
   <section id="fail" hidden role="alert">

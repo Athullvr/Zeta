@@ -15,10 +15,10 @@ function simulate(gov, workMs, seconds, { vsync = 1000 / 60, startAt = 0, hitch 
   return { changes, now };
 }
 
-test("defaults are conservative: scale stays in 0.5..1 and steps are modest", () => {
-  assert.equal(DEFAULTS.min, .5); assert.equal(DEFAULTS.max, 1);
+test("defaults react quickly and scale stays in 0.35..1", () => {
+  assert.equal(DEFAULTS.min, .35); assert.equal(DEFAULTS.max, 1);
   assert.ok(DEFAULTS.downMs >= 20 && DEFAULTS.upMs < DEFAULTS.downMs, "a hysteresis band exists");
-  assert.ok(DEFAULTS.upStep <= 1.1 && DEFAULTS.downStep >= .85);
+  assert.ok(DEFAULTS.upStep <= 1.1 && DEFAULTS.downStep >= .8);
 });
 
 test("a machine that holds 60 fps is left alone", () => {
@@ -32,8 +32,8 @@ test("sustained slow frames reduce the scale, never below the minimum, and then 
   const g = createGovernor();
   const { changes } = simulate(g, () => 80, 120);
   assert.ok(changes.length >= 3);
-  for (const c of changes) assert.ok(c.scale >= .5 && c.scale <= 1);
-  assert.equal(g.scale, .5);
+  for (const c of changes) assert.ok(c.scale >= .35 && c.scale <= 1);
+  assert.equal(g.scale, .35);
   const later = simulate(g, () => 80, 60, { startAt: 200000 });
   assert.deepEqual(later.changes, [], "no further changes at the floor");
 });
@@ -46,12 +46,15 @@ test("scale limits are configurable and respected, including the initial value",
   assert.equal(createGovernor({ min: .7, max: .9, initial: .1 }).scale, .7);
 });
 
-test("the first frames (warm-up) and stalls do not count", () => {
+test("warm-up is ignored; foreground stalls count, hidden-tab intervals do not", () => {
   const g = createGovernor();
   for (let i = 0; i < DEFAULTS.warmup; i++) assert.equal(g.sample(200, i * 200), null);
   const g2 = createGovernor();
-  for (let i = 0; i < 400; i++) g2.sample(2000, i * 2000);      // tab in the background: huge frame times
+  for (let i = 0; i < 400; i++) g2.sample(2000, i * 2000, { hidden: true });
   assert.equal(g2.scale, 1);
+  const g3 = createGovernor();
+  for (let i = 0; i < 45; i++) g3.sample(300, i * 300);
+  assert.ok(g3.scale < 1, "repeated long foreground frames are evidence of overload");
 });
 
 test("occasional hitches (under 10% of frames) do not trigger a reduction", () => {

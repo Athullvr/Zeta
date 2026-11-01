@@ -2,21 +2,21 @@
 // It never touches the DOM, WebGL or the clock, so it is unit-tested in node with synthetic frame times.
 //
 // What it does NOT do: guarantee 60 fps. It only trades sharpness for speed when frames are sustainedly slow,
-// and wins resolution back slowly when they are not. Below the minimum scale it stops, whatever the frame rate.
+// and restores resolution only after sustained stable frames. Below the minimum scale it stops, whatever the frame rate.
 //
 // The scale is a multiplier (MIN..MAX, default 0.5..1) applied to the page's base resolution (devicePixelRatio and the
 // drawing-buffer cap, or a manual ?scale). Changing it resizes buffers only: shaders are never recompiled and the
 // CSS size of the frame, and so the composition and typography, does not change.
 //
 // Policy (all numbers are the defaults in DEFAULTS and are overridable for tests):
-//  * Frames are judged on a trimmed mean of the last 90 frames (the slowest 10% are dropped, so one hitch is ignored).
-//    A decision needs 90 frames, or at least 24 frames spanning 1.5 s, so a slow machine is judged within seconds.
-//  * The first 30 frames after start, a resize or a restart are ignored (driver warm-up). A frame over 250 ms is a stall
-//    (tab switch, debugger) and is dropped, not counted.
-//  * DOWN: trimmed mean above 24 ms (about 42 fps) -> scale x0.88, or x0.75 if above 40 ms (about 25 fps).
-//    At least 2 s must pass since the last change.
-//  * UP: trimmed mean within 1.15x of the display's own refresh interval (estimated as the 5th-percentile frame time,
-//    clamped to 6.5..34 ms) and under 18.5 ms -> scale x1.08. At least `upDwell` (6 s) since the last change.
+//  * A trimmed mean of the last 60 foreground frames drops the slowest 10%, so an isolated hitch is ignored.
+//    Decisions begin after 12 frames / 300 ms; a slow machine is judged quickly even when frames are late.
+//  * The first 12 frames after start, resize or restart are ignored. Foreground frames over 250 ms are capped at
+//    120 ms and counted; hidden-tab time is discarded explicitly by the caller.
+//  * DOWN: trimmed mean above 23 ms -> scale x0.82, x0.68 above 40 ms, or x0.55 above 80 ms. Severe overload reacts
+//    within about a second and can reach a 0.35 floor. At least 850 ms pass between reductions.
+//  * UP: trimmed mean below 18.5 ms and within 1.15x of the estimated refresh interval (minimum 15 ms) -> scale x1.05.
+//    At least `upDwell` (8 s) of stable performance pass between quality probes.
 //    On a vsync-capped display frame time cannot show spare headroom, so this is a probe: if it is followed by a DOWN
 //    within 10 s, the probe failed: the scale returns to exactly what it was before the probe, that value becomes a
 //    ceiling for 120 s, and upDwell doubles (up to 60 s). So a limit costs one brief slow stretch every few minutes, not a flicker.
@@ -26,12 +26,12 @@
   "use strict";
 
   const DEFAULTS = {
-    min: .5, max: 1,
-    window: 90, minFrames: 24, minWindowMs: 1500, warmup: 30, stallMs: 250, trim: .10,
-    downMs: 24, hardMs: 40, downStep: .88, hardStep: .75, downDwell: 2000,
-    upMs: 18.5, upRefreshFactor: 1.15, upStep: 1.08, upDwell: 6000, maxUpDwell: 60000,
+    min: .35, max: 1,
+    window: 60, minFrames: 12, minWindowMs: 300, warmup: 12, stallMs: 250, stallContributionMs: 120, trim: .10,
+    downMs: 23, hardMs: 40, criticalMs: 80, downStep: .82, hardStep: .68, criticalStep: .55, downDwell: 850,
+    upMs: 18.5, upRefreshFactor: 1.15, upStep: 1.05, upDwell: 8000, maxUpDwell: 60000,
     failWindow: 10000, ceilingHold: 120000,
-    refreshMin: 6.5, refreshMax: 34,
+    refreshMin: 15, refreshMax: 34,
   };
 
   const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -83,11 +83,14 @@
 
       // Call once per presented frame with the time since the previous frame (ms) and the current time (ms).
       // Returns the new scale if it changed, otherwise null.
-      sample(dt, now) {
+      sample(dt, now, { hidden = false } = {}) {
         if (!enabled || !(dt > 0)) return null;
-        if (dt > C.stallMs) { dts = []; return null; }
+        if (hidden) { dts = []; seen = 0; return null; }
+        // In a visible tab, late frames are evidence of overload. Capping stops one debugger pause from
+        // dominating the mean while repeated very slow frames still trigger a rapid reduction.
+        const measured = dt > C.stallMs ? Math.min(dt, C.stallContributionMs) : dt;
         if (++seen <= C.warmup) return null;
-        dts.push(dt); allDts.push(dt);
+        dts.push(measured); allDts.push(measured);
         if (dts.length > C.window) dts.shift();
         if (allDts.length > 600) allDts.shift();
         // enough evidence: a full window, or at least minFrames spanning minWindowMs (so a slow machine is judged in seconds)
@@ -98,7 +101,8 @@
         refresh = estimateRefresh();
 
         if (mean > C.downMs && scale > lo && since >= C.downDwell) {
-          let next = scale * (mean > C.hardMs ? C.hardStep : C.downStep);
+          const step = mean > C.criticalMs ? C.criticalStep : mean > C.hardMs ? C.hardStep : C.downStep;
+          let next = scale * step;
           if (lastUpAt != null && now - lastUpAt < C.failWindow && scaleBeforeUp != null) {
             // the probe failed: go back to exactly the scale that worked, and stop probing above it for a while
             ceiling = scaleBeforeUp; ceilingAt = now; upDwell = Math.min(C.maxUpDwell, upDwell * 2);

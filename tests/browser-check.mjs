@@ -76,9 +76,9 @@ await page.waitFor("__eternal.clock.time() > 9", 60000);
 const mid = await page.eval(`JSON.stringify({ t: __eternal.clock.time(), fps: __eternal.avgFps(), scale: document.documentElement.dataset.renderScale, log: __eternal.governor.log,
   css: document.getElementById('c').getBoundingClientRect().toJSON(), gl: window.__gl, buf: [document.getElementById('c').width, document.getElementById('c').height], frames: __eternal.perf.frames })`).then(JSON.parse);
 const wallElapsed = (Date.now() - wall0) / 1000;
-await check("real loop: a slow renderer (software GL) is stepped down within seconds, never below 0.5", () => {
+await check("real loop: a slow renderer (software GL) is stepped down quickly, never below 0.35", () => {
   assert.ok(mid.fps > 0 && mid.frames > 20, `loop ran ${mid.frames} frames`);
-  if (mid.fps < 40) { assert.ok(mid.log.length >= 1, `avg ${mid.fps} fps but no scale change`); assert.ok(+mid.scale < 1 && +mid.scale >= .5); }
+  if (mid.fps < 40) { assert.ok(mid.log.length >= 1, `avg ${mid.fps} fps but no scale change`); assert.ok(+mid.scale < 1 && +mid.scale >= .35); }
   note(`avg ${mid.fps} fps (software), scale ${before.scale} -> ${mid.scale}, buffer ${before.buf.join("x")} -> ${mid.buf.join("x")}, changes: ${mid.log.map(l => `${l.from}->${l.to} @${(l.at / 1000).toFixed(1)}s (${l.meanMs} ms)`).join("; ") || "none"}`);
 });
 await check("scale changes keep the composition: canvas CSS box identical, no shader recompiles", () => {
@@ -107,13 +107,15 @@ await check("resizing and rescaling keep rendering valid (no GL errors, right si
       const W = c.width, H = c.height, px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
       let s = 0, n = 0; for (let i = 0; i < px.length; i += 64) { s += px[i] + px[i + 1] + px[i + 2]; n += 3; }
       const box = c.getBoundingClientRect(), info = e.info();
-      return JSON.stringify({ W, H, mean: s / n, errors: e.renderer.drainErrors(), box: [box.width, box.height], aspect: box.width / box.height, scale: info.renderScale, cssW: innerWidth, compile: window.__gl }); })()`).then(JSON.parse);
+      return JSON.stringify({ W, H, transition: info.transitionTarget, bloom: info.bloomQuality, mean: s / n, errors: e.renderer.drainErrors(), box: [box.width, box.height], aspect: box.width / box.height, scale: info.renderScale, cssW: innerWidth, compile: window.__gl }); })()`).then(JSON.parse);
     rows.push(`${w}x${h}@${dpr}x scale ${scale} -> ${r.W}x${r.H}`);
     assert.deepEqual(r.errors, [], `GL errors at ${w}x${h}`);
     assert.ok(r.mean > 8, `blank picture at ${w}x${h}: mean ${r.mean}`);
     assert.ok(Math.abs(r.aspect - 2.39) < .02, `aspect ${r.aspect}`);
     assert.ok(r.W >= 32 && r.H >= 32 && r.W * r.H <= 2.6e6 + 1, `buffer ${r.W}x${r.H}`);
     assert.ok(Math.abs(r.W / r.H - r.aspect) < .05, "buffer aspect matches the frame");
+    assert.ok(r.transition[0] <= r.W * .68 && r.transition[1] <= r.H * .68, "the incoming transition frame does not reserve full resolution");
+    assert.ok(Math.abs(r.transition[0] / r.transition[1] - r.W / r.H) < .05, "reduced transition target preserves aspect ratio");
     assert.equal(r.scale, scale);
     assert.equal(J(r.compile), compiles, "shaders were recompiled");
   }
@@ -279,9 +281,10 @@ await check("a missing local soundtrack reports a soft silent fallback and never
   await page.waitFor("__eternal.audioController.failed === true", 15000);
   assert.equal(await page.eval("document.getElementById('fail').hidden"), true);
   assert.equal(await page.eval("document.querySelector('#controls').hidden"), false);
-  const initial = await page.eval("JSON.stringify({ paused: __eternal.audioController.audio.paused, context: __eternal.audioController.context, status: document.getElementById('audio-status').textContent })").then(JSON.parse);
+  const initial = await page.eval("JSON.stringify({ paused: __eternal.audioController.audio.paused, context: __eternal.audioController.context, volume: __eternal.audioController.audio.volume, muted: __eternal.audioController.audio.muted, status: document.getElementById('audio-status').textContent })").then(JSON.parse);
   assert.equal(initial.paused, true);
-  assert.equal(initial.context, null, "audio context waits for a user action");
+  assert.equal(initial.context, null, "native media output does not construct an AudioContext");
+  assert.ok(initial.volume === 0 || initial.muted, "a missing soundtrack cannot emit stale audio");
   assert.match(initial.status, /missing|unreadable/i);
   const at = await page.eval("__eternal.clock.time()");
   await page.click("#play-film");
@@ -307,24 +310,33 @@ await check("a configured shorter duration resolves the picture to black at its 
   note("custom ?duration=20 resolves the visual endpoint without freezing on an Act II frame.");
 });
 
-await check("a generated WAV follows the film clock through play, pause, resume, restart, seek, fades, mute and silent preview", async () => {
+await check("a generated WAV and diagnostic tone use native media output through play, pause, resume, restart, seek, fades, mute and silent preview", async () => {
   const toneUrl = `tests/shots/${TONE_PATH.split(/[\\/]/).pop()}`;
   await page.goto(`${INDEX}?debug=1&audio=${encodeURIComponent(toneUrl)}&offset=0.4&fadein=4&fadeout=50&duration=60`);
   await page.waitFor("document.documentElement.dataset.ready === '1'");
   await page.waitFor("__eternal.audioController.audio.readyState >= 1", 15000);
-  const before = await page.eval("JSON.stringify({ paused: __eternal.audioController.audio.paused, context: __eternal.audioController.context, duration: __eternal.playbackDuration, path: __eternal.audioController.config.src })").then(JSON.parse);
+  const before = await page.eval("JSON.stringify({ paused: __eternal.audioController.audio.paused, context: __eternal.audioController.context, duration: __eternal.playbackDuration, path: __eternal.audioController.config.src, volume: __eternal.audioController.audio.volume, muted: __eternal.audioController.audio.muted })").then(JSON.parse);
   assert.equal(before.paused, true, "the file may load, but audio must not autoplay");
   assert.equal(before.context, null);
   assert.equal(before.duration, 60);
   assert.ok(before.path.endsWith("eternal-test-tone.wav"), `audio path ${before.path}`);
+  assert.ok(before.volume > 0 && !before.muted);
   assert.ok(await page.eval("document.querySelector('#play-film').tabIndex >= 0 && document.querySelector('label[for=film-seek]') !== null"), "controls are keyboard reachable and labelled");
+
+  await page.click("#test-audio");
+  await page.waitFor("__eternal.audioController.diagnostics().testTonePlayback === 'playing'", 5000);
+  assert.match(await page.eval("__eternal.audioController.diagnostics().testTone"), /playing 523 Hz/);
+  await page.waitFor("__eternal.audioController.diagnostics().testTonePlayback === 'ended'", 5000);
+  assert.equal(await page.eval("__eternal.audioController.context"), null, "diagnostic tone uses native output, with no AudioContext");
 
   await page.click("#play-film");
   note("WAV control check: explicit play");
   await page.waitFor("__eternal.audioController.isPlaying", 10000);
   await page.waitFor("__eternal.audioController.audio.currentTime > 0.5", 10000);
-  const running = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, rate: __eternal.audioController.audio.playbackRate, state: __eternal.audioController.context.state, gain: __eternal.audioController.gain })").then(JSON.parse);
-  assert.equal(running.state, "running", "suspended AudioContext resumes after the trusted Play click");
+  const running = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, rate: __eternal.audioController.audio.playbackRate, context: __eternal.audioController.context, muted: __eternal.audioController.audio.muted, volume: __eternal.audioController.audio.volume, gain: __eternal.audioController.gain })").then(JSON.parse);
+  assert.equal(running.context, null, "native media output does not depend on AudioContext state");
+  assert.equal(running.muted, false);
+  assert.ok(running.volume > 0);
   assert.equal(running.rate, 1);
   assert.ok(Math.abs(running.audio - (.4 + running.t)) < .35, `audio ${running.audio} vs film ${running.t}`);
   assert.ok(running.gain >= 0 && running.gain <= .72, `fade-in gain ${running.gain}`);
@@ -343,11 +355,11 @@ await check("a generated WAV follows the film clock through play, pause, resume,
   const resumed = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);
   assert.ok(Math.abs(resumed.audio - (.4 + resumed.t)) < .35, "resume stays aligned to the same clock");
 
-  await page.eval("__eternal.audioController.context.suspend()");
-  await page.waitFor("__eternal.audioController.context.state === 'running'", 10000);
-  const recovered = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, state: __eternal.audioController.context.state })").then(JSON.parse);
-  assert.equal(recovered.state, "running", "the live controller resumes a browser-suspended AudioContext");
-  assert.ok(Math.abs(recovered.audio - (.4 + recovered.t)) < .35, "audio remains aligned after context suspension");
+  await page.eval("__eternal.audioController.audio.pause()");
+  await page.waitFor("__eternal.audioController.isPlaying", 10000);
+  const recovered = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime, context: __eternal.audioController.context })").then(JSON.parse);
+  assert.equal(recovered.context, null, "there is no AudioContext to suspend in the native output architecture");
+  assert.ok(Math.abs(recovered.audio - (.4 + recovered.t)) < .35, "controller recovers a paused media element at film time");
 
   await page.eval("(() => { const s = document.getElementById('film-seek'); s.value = '2.5'; s.dispatchEvent(new Event('input', { bubbles: true })); })()");
   const sought = await page.eval("JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime })").then(JSON.parse);

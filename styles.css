@@ -74,12 +74,18 @@ body { display: grid; place-items: center; }
 #controls label, #film-time { white-space: nowrap; }
 #film-time { min-width: 5.8rem; text-align: right; font-variant-numeric: tabular-nums; }
 #audio-status { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #98a4ba; }
+#test-audio { flex-shrink: 0; white-space: nowrap; }
+#audio-debug { margin-top: .35rem; color: #98a4ba; font: 11px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+#audio-debug summary { width: fit-content; cursor: pointer; color: #b7c1d4; font: 11px/1.4 var(--serif); }
+#audio-diagnostics { max-height: 10rem; overflow: auto; margin: .3rem 0; padding: .5rem; white-space: pre-wrap; overflow-wrap: anywhere; background: rgba(0, 0, 0, .5); }
+#test-audio-status { display: block; color: #b7c1d4; }
 @media (max-width: 620px) {
   #controls { width: calc(100vw - 16px); padding: .45rem .5rem; font-size: 11px; }
   .transport-controls { gap: .25rem; }
   #controls button { padding: .28rem .38rem; }
   #music-volume { width: 4rem; }
   .sound-controls { gap: .35rem; }
+  .sound-controls { flex-wrap: wrap; }
   #audio-status { max-width: 34vw; }
 }
 

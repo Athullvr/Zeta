@@ -79,7 +79,13 @@ test("setScale multiplies the buffer, resizes only buffers, and never compiles s
   const gl = stubGL(), canvas = stubCanvas(gl), r = createRenderer(canvas);
   assert.equal(gl.calls.compileShader, 8); assert.equal(gl.calls.linkProgram, 4);   // four programs, compiled once: scene, interior, terrace, post
   assert.deepEqual(r.resize(1000, 418, 1), { width: 1000, height: 418 });
+  assert.equal(gl.calls.texStorage.length, 2, "one full target and one reduced transition target are allocated");
+  r.resize(1000, 418, 1);
+  assert.equal(gl.calls.texStorage.length, 2, "identical dimensions reuse both framebuffers");
+  assert.deepEqual(r.info().transitionTarget, [670, 280]);
   assert.deepEqual(r.setScale(.5), { width: 500, height: 209 });
+  assert.deepEqual(r.info().transitionTarget, [335, 140], "the smaller target follows the governed drawing-buffer size");
+  assert.equal(r.info().bloomQuality, .25, "bloom switches to its reduced pass at smaller effective scale");
   assert.deepEqual(r.setScale(1), { width: 1000, height: 418 });
   assert.equal(r.scale, 1);
   assert.equal(gl.calls.compileShader, 8, "no shader recompiled by scale changes");
@@ -118,5 +124,6 @@ test("info reports what a benchmark needs", () => {
   const r = createRenderer(stubCanvas(stubGL())); r.resize(960, 402, 1);
   const i = r.info();
   assert.equal(i.width, 960); assert.equal(i.renderScale, 1); assert.equal(i.shaderCompiles, 4);
+  assert.ok(i.transitionTarget[0] < i.width && i.transitionTarget[1] < i.height);
   assert.ok(i.limits.maxTexture > 0 && Array.isArray(i.limits.maxViewport) && i.version && "floatTarget" in i && "compileMs" in i);
 });

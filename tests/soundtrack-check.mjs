@@ -1,5 +1,5 @@
-// Exercises the supplied MP3 in Chromium, including a full real-time film run.
-// Headless Chromium has no usable audio sink here, so playback is confirmed through its decoded media timeline and ended event.
+// Exercises the supplied MP3 in Chromium, including native media output and a full real-time film run.
+// Headless media state verifies decoding and controls; only a human listening on the host can confirm audibility.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -33,6 +33,9 @@ try {
     filmDuration: __eternal.director.duration,
     passageDuration: __eternal.playbackDuration,
     paused: __eternal.audioController.audio.paused,
+    readyState: __eternal.audioController.audio.readyState,
+    volume: __eternal.audioController.audio.volume,
+    muted: __eternal.audioController.audio.muted,
     context: __eternal.audioController.context
   })`).then(JSON.parse);
   assert.equal(loaded.src, "assets/audio/eternal-score.mp3");
@@ -41,15 +44,26 @@ try {
   assert.ok(Math.abs(loaded.filmDuration - EXPECTED_DURATION) < .01);
   assert.equal(loaded.passageDuration, 20);
   assert.equal(loaded.paused, true, "loading must not autoplay");
-  assert.equal(loaded.context, null, "AudioContext waits for a user interaction");
-  note(`MP3 loaded offline: ${loaded.audioDuration.toFixed(3)} s, stereo media element; no autoplay before the Play click.`);
+  assert.equal(loaded.context, null, "native HTMLAudio output does not create an AudioContext");
+  assert.ok(loaded.readyState >= 1 && loaded.volume > 0 && !loaded.muted);
+  note(`MP3 loaded offline: ${loaded.audioDuration.toFixed(3)} s; native output, volume ${loaded.volume}, not muted, no autoplay before Play.`);
+
+  await page.click("#test-audio");
+  await page.waitFor("__eternal.audioController.diagnostics().testTonePlayback === 'playing'", 5000);
+  const tone = await page.eval("JSON.stringify(__eternal.audioController.diagnostics())").then(JSON.parse);
+  assert.match(tone.testTone, /playing 523 Hz/);
+  assert.equal(tone.graph, "native media output; no Web Audio nodes to disconnect");
+  note("User-triggered TEST AUDIO tone entered native browser media output (headless state only; not an audibility claim).");
 
   await page.click("#play-film");
   await page.waitFor("__eternal.audioController.isPlaying && __eternal.clock.time() > 2.2", 12000);
   const playing = await page.eval(`JSON.stringify({ t: __eternal.clock.time(), audio: __eternal.audioController.audio.currentTime,
     playedRanges: __eternal.audioController.audio.played.length, rate: __eternal.audioController.audio.playbackRate,
-    state: __eternal.audioController.context.state, gain: __eternal.audioController.gain })`).then(JSON.parse);
-  assert.equal(playing.state, "running", "the trusted Play click resumes AudioContext");
+    muted: __eternal.audioController.audio.muted, volume: __eternal.audioController.audio.volume,
+    context: __eternal.audioController.context, gain: __eternal.audioController.gain })`).then(JSON.parse);
+  assert.equal(playing.context, null, "native media playback does not depend on AudioContext state");
+  assert.equal(playing.muted, false);
+  assert.ok(playing.volume > 0, "native media volume is nonzero");
   assert.equal(playing.rate, 1, "the MP3 must play at its native speed");
   assert.ok(playing.playedRanges > 0 && playing.audio > 3, "the actual MP3 media range advances after the Play click");
   assert.ok(Math.abs(playing.audio - (1 + playing.t)) < .35, `offset alignment: audio ${playing.audio}, film ${playing.t}`);
