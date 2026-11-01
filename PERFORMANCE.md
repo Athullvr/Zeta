@@ -25,3 +25,15 @@ Baseline fixed-scale measurements from the headless SwiftShader profile (`ETERNA
 | 1920×1080 (host display size) | 1920×803 | 3.2 | 16.7 / 200 / 13049.5 ms | 0.1 | 490.4 |
 
 All three rows used `ANGLE / SwiftShader`; they expose the severe fill-rate/resolution slope and long software-renderer stalls. The 1920×1080 row is display-sized emulation, not a physical GPU result.
+
+## After optimization
+
+The final adaptive profile used the same viewport/DPR settings with `ETERNAL_PROFILE_ADAPT=1`:
+
+| Emulated viewport | Governor scale | Drawing buffer | Avg loop FPS | p50 / p95 / p99 | 1% low | Synchronous ms/frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 800×450 | 0.35 | 280×117 | 18.3 | 16.7 / 100.1 / 216.6 ms | 4.6 | 9.9 |
+| 1280×720 | 0.45 | 576×241 | 21.8 | 16.7 / 200 / 366.7 ms | 2.7 | 38.7 |
+| 1920×1080 (host display size) | 0.35 | 672×281 | 29.7 | 16.7 / 116.6 / 550 ms | 1.8 | 54.4 |
+
+The adaptive run lowered synchronous cost by reducing the internal resolution (about 9× at the display-sized viewport). These software-rendered loop percentiles still have large stalls, so they do not establish hardware-GPU FPS. During the separate live fullscreen test, the governor reduced 1920×803 to 1056×442 at scale 0.55 while the CSS frame stayed fixed; longer adaptive profiling reached the 0.35 floor. Recovery probes remain gradual and are covered by the governor unit tests.

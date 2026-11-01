@@ -89,6 +89,21 @@ await check("scale changes keep the composition: canvas CSS box identical, no sh
 await check("the timeline follows the clock, not the frame rate (film time tracks wall time)", () => {
   assert.ok(Math.abs(mid.t - wallElapsed) < 1.2, `film t=${mid.t.toFixed(2)} vs wall ${wallElapsed.toFixed(2)}`);
 });
+await check("maximized playback responds to sustained full-resolution overload", async () => {
+  await page.resize(1920, 1080, 1);
+  await page.goto(`${INDEX}?debug=1`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  const full = await page.eval("JSON.stringify({ css: document.getElementById('c').getBoundingClientRect().toJSON(), scale: __eternal.renderer.scale, buf: [document.getElementById('c').width, document.getElementById('c').height] })").then(JSON.parse);
+  await page.waitFor("__eternal.governor.log.length > 0", 90000);
+  const adapted = await page.eval("JSON.stringify({ css: document.getElementById('c').getBoundingClientRect().toJSON(), scale: __eternal.renderer.scale, buf: [document.getElementById('c').width, document.getElementById('c').height], changes: __eternal.governor.log, compile: window.__gl })").then(JSON.parse);
+  assert.ok(adapted.scale < 1 && adapted.scale >= .35, `adaptive scale ${adapted.scale}`);
+  assert.ok(adapted.buf[0] < full.buf[0] && adapted.buf[1] < full.buf[1], "drawing buffer shrinks when fullscreen software rendering falls behind");
+  assert.deepEqual(adapted.css, full.css, "CSS composition size is preserved");
+  assert.deepEqual(adapted.compile, { compile: 8, link: 4 }, "fullscreen rescaling does not compile shaders");
+  note(`1920x1080 emulation: ${full.buf.join("x")} -> ${adapted.buf.join("x")} at scale ${adapted.scale}; ${adapted.changes.length} scale changes; CSS frame unchanged.`);
+});
+await page.resize(960, 540);
+await sleep(150);
 await page.waitFor("__eternal.clock.time() > 12.6", 30000);
 writeFileSync(join(SHOTS, "live_t12_960x540.png"), await page.screenshot());
 note("screenshot of the live, animated page (governed scale): tests/shots/live_t12_960x540.png");
@@ -271,6 +286,19 @@ await check("?bench reports environment, GL info, real-loop stats and synchronou
   assert.ok(/Real animation loop/.test(text) && /Synchronous back-to-back/.test(text) && /not frame pacing/.test(text) && /SOFTWARE/.test(text));
   writeFileSync(join(SHOTS, "bench-software-sandbox.txt"), text + "\n");
   note(`real loop ${r.animationLoop.avgFps} fps (${r.animationLoop.frames} frames); synchronous ${r.synchronous.meanMs} ms/frame; verdict ${r.verdict.kind}`);
+});
+
+await check("?bench=1&adapt=1 reports governor changes without compiling shaders during rescale", async () => {
+  await page.goto(`${INDEX}?bench=1&adapt=1`);
+  await page.waitFor("document.documentElement.dataset.reported === '1'", 120000);
+  const r = JSON.parse(await page.eval("document.getElementById('report').textContent"));
+  assert.equal(r.governor.enabled, true);
+  assert.equal(r.governor.min, .35);
+  assert.ok(r.governor.changes.length > 0, "software rendering should cause at least one measured scale reduction");
+  assert.ok(r.governor.finalScale >= .35 && r.governor.finalScale < 1);
+  assert.deepEqual(await page.eval("window.__gl"), { compile: 8, link: 4 });
+  assert.ok(r.animationLoop.p95Ms > 0 && r.animationLoop.p99Ms > 0 && r.animationLoop.onePercentLowFps > 0);
+  note(`adaptive benchmark: ${r.governor.initialScale}->${r.governor.finalScale}; ${r.governor.changes.length} logged scale changes; no new shader programs.`);
 });
 
 // ---------------------------------------------------------------- 5b. optional local audio and synchronization controls

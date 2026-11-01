@@ -57,6 +57,17 @@ test("warm-up is ignored; foreground stalls count, hidden-tab intervals do not",
   assert.ok(g3.scale < 1, "repeated long foreground frames are evidence of overload");
 });
 
+test("one foreground stall is filtered, two consecutive stalls trigger a fast reduction", () => {
+  const g = createGovernor();
+  assert.equal(g.sample(300, 300), null);
+  assert.equal(g.scale, 1, "one long frame may be an isolated hitch");
+  g.sample(16.7, 317);
+  assert.equal(g.sample(300, 617), null);
+  const next = g.sample(300, 917);
+  assert.equal(next, .55);
+  assert.equal(g.log.at(-1).reason, "severe stall");
+});
+
 test("occasional hitches (under 10% of frames) do not trigger a reduction", () => {
   const g = createGovernor();
   const { changes } = simulate(g, () => 10, 60, { hitch: { every: 25, ms: 120 } });

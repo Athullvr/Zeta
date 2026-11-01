@@ -4,7 +4,7 @@
 // What it does NOT do: guarantee 60 fps. It only trades sharpness for speed when frames are sustainedly slow,
 // and restores resolution only after sustained stable frames. Below the minimum scale it stops, whatever the frame rate.
 //
-// The scale is a multiplier (MIN..MAX, default 0.5..1) applied to the page's base resolution (devicePixelRatio and the
+// The scale is a multiplier (MIN..MAX, default 0.35..1) applied to the page's base resolution (devicePixelRatio and the
 // drawing-buffer cap, or a manual ?scale). Changing it resizes buffers only: shaders are never recompiled and the
 // CSS size of the frame, and so the composition and typography, does not change.
 //
@@ -12,7 +12,7 @@
 //  * A trimmed mean of the last 60 foreground frames drops the slowest 10%, so an isolated hitch is ignored.
 //    Decisions begin after 12 frames / 300 ms; a slow machine is judged quickly even when frames are late.
 //  * The first 12 frames after start, resize or restart are ignored. Foreground frames over 250 ms are capped at
-//    120 ms and counted; hidden-tab time is discarded explicitly by the caller.
+//    120 ms and counted; two consecutive visible stalls can reduce scale immediately, while an isolated hitch is ignored.
 //  * DOWN: trimmed mean above 23 ms -> scale x0.82, x0.68 above 40 ms, or x0.55 above 80 ms. Severe overload reacts
 //    within about a second and can reach a 0.35 floor. At least 850 ms pass between reductions.
 //  * UP: trimmed mean below 18.5 ms and within 1.15x of the estimated refresh interval (minimum 15 ms) -> scale x1.05.
@@ -51,7 +51,7 @@
     const enabled = options.enabled !== false;
     const lo = Math.max(.05, C.min), hi = Math.max(lo, C.max);
     let scale = clamp(options.initial == null ? hi : options.initial, lo, hi);
-    let dts = [], seen = 0, lastChangeAt = null, lastUpAt = null, scaleBeforeUp = null;
+    let dts = [], seen = 0, lateStreak = 0, lastChangeAt = null, lastUpAt = null, scaleBeforeUp = null;
     let upDwell = C.upDwell, ceiling = hi, ceilingAt = -Infinity, refresh = null;
     const allDts = [];
     const log = [];
@@ -70,7 +70,7 @@
       next = round2(clamp(next, lo, Math.min(hi, ceiling)));
       if (next === scale) return null;
       log.push({ at: Math.round(now), from: scale, to: next, reason, meanMs: +mean.toFixed(1) });
-      scale = next; lastChangeAt = now; dts = [];      // the new scale gets a fresh window: old frames say nothing about it
+      scale = next; lastChangeAt = now; dts = []; lateStreak = 0; // the new scale gets a fresh window: old frames say nothing about it
       return scale;
     }
 
@@ -85,10 +85,23 @@
       // Returns the new scale if it changed, otherwise null.
       sample(dt, now, { hidden = false } = {}) {
         if (!enabled || !(dt > 0)) return null;
-        if (hidden) { dts = []; seen = 0; return null; }
+        if (hidden) { dts = []; seen = 0; lateStreak = 0; return null; }
+        lateStreak = dt > C.stallMs ? lateStreak + 1 : 0;
         // In a visible tab, late frames are evidence of overload. Capping stops one debugger pause from
         // dominating the mean while repeated very slow frames still trigger a rapid reduction.
         const measured = dt > C.stallMs ? Math.min(dt, C.stallContributionMs) : dt;
+        // Two consecutive foreground stalls are strong evidence of a resolution overload. React before a
+        // full averaging window can finish; a single stall is still filtered as an isolated hitch below.
+        if (lateStreak >= 2 && scale > lo && (lastChangeAt == null || now - lastChangeAt >= C.downDwell)) {
+          if (now - ceilingAt > C.ceilingHold) ceiling = hi;
+          let next = scale * C.criticalStep;
+          if (lastUpAt != null && now - lastUpAt < C.failWindow && scaleBeforeUp != null) {
+            ceiling = scaleBeforeUp; ceilingAt = now; upDwell = Math.min(C.maxUpDwell, upDwell * 2);
+            next = Math.min(next, scaleBeforeUp);
+          }
+          lastUpAt = null;
+          return change(next, now, "severe stall", measured);
+        }
         if (++seen <= C.warmup) return null;
         dts.push(measured); allDts.push(measured);
         if (dts.length > C.window) dts.shift();
@@ -120,7 +133,7 @@
       },
 
       // After a resize, a restart or the tab becoming visible again: forget the window and warm up again.
-      reset() { dts = []; seen = 0; },
+      reset() { dts = []; seen = 0; lateStreak = 0; },
     };
   }
 
