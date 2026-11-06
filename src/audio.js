@@ -82,6 +82,7 @@
     const cfg = normalizeConfig(config);
     let intent = false, silent = false, muted = false, blocked = false, failed = !cfg.sourceValid;
     let starting = false, ended = false, filmTime = 0, filmDuration = 0, volume = cfg.volume;
+    let duckGain = 1, duckTarget = 1, duckTimer = null, duckRampFrom = 1, duckRampStartedAt = 0, duckRampDuration = 0;
     let diagnosticActive = false, testAudio = null, testToneUrl = null, testToneStatus = "not played";
     let status = "Checking for the local soundtrack…", mediaError = "";
 
@@ -130,6 +131,7 @@
         currentTime: Number.isFinite(audio.currentTime) ? +audio.currentTime.toFixed(2) : null,
         duration: Number.isFinite(audio.duration) ? +audio.duration.toFixed(2) : null,
         volume: Number(audio.volume), muted: !!audio.muted, playbackRate: Number(audio.playbackRate),
+        duckFactor: +duckGain.toFixed(3),
         audioContext: "not used (native HTMLAudioElement output)",
         graph: "native media output; no Web Audio nodes to disconnect",
         mediaError: err,
@@ -138,10 +140,29 @@
       };
     }
     function applyGain() {
-      const gain = failed || silent ? 0 : volume * fadeGain(filmTime, filmDuration, cfg);
+      const gain = failed || silent ? 0 : volume * fadeGain(filmTime, filmDuration, cfg) * duckGain;
       try { audio.volume = diagnosticActive ? 0 : gain; } catch {}
       try { audio.muted = muted || failed || silent || diagnosticActive; } catch {}
       return diagnosticActive ? 0 : gain;
+    }
+    function setDuck(value, seconds = .35) {
+      const target = Math.min(1, Math.max(0, Number(value) || 0));
+      if (Math.abs(target - duckTarget) < .001) return;
+      duckTarget = target;
+      // The narration envelope may move a little every film frame. Retarget an active ramp
+      // without restarting it, so the music still reaches the intended level smoothly.
+      if (duckTimer !== null) return;
+      const durationMs = Math.max(0, Number(seconds) || 0) * 1000;
+      duckRampFrom = duckGain; duckRampStartedAt = Date.now(); duckRampDuration = durationMs;
+      if (!durationMs) { duckGain = target; applyGain(); publishDiagnostics(); return; }
+      const step = () => {
+        const progress = Math.min(1, (Date.now() - duckRampStartedAt) / duckRampDuration);
+        duckGain = duckRampFrom + (duckTarget - duckRampFrom) * progress;
+        applyGain();
+        if (progress < 1) duckTimer = setTimeout(step, 16);
+        else { duckGain = duckTarget; duckTimer = null; applyGain(); publishDiagnostics(); }
+      };
+      step();
     }
     function seekElement(t) {
       if (failed || !Number.isFinite(t)) return;
@@ -271,15 +292,17 @@
       }
     }
     function destroy() {
+      if (duckTimer !== null) { clearTimeout(duckTimer); duckTimer = null; }
       try { if (testAudio) testAudio.pause(); } catch {}
       if (testToneUrl && typeof URL !== "undefined") URL.revokeObjectURL(testToneUrl);
     }
 
     return {
-      config: cfg, audio, playAt, pause, seek, sync, finish, setVolume, setMuted, setSilent, playTestTone, destroy,
+      config: cfg, audio, playAt, pause, seek, sync, finish, setVolume, setMuted, setSilent, setDuck, playTestTone, destroy,
       get status() { return status; },
       get context() { return null; },
       get gain() { return audio.muted ? 0 : Number(audio.volume); },
+      get duckFactor() { return duckGain; },
       get isPlaying() { return intent && !silent && !failed && !audio.paused; },
       get isSilent() { return silent; },
       get failed() { return failed; },

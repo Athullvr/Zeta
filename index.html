@@ -33,6 +33,13 @@
       <button id="test-audio" type="button" title="Play a short tone through the browser's native audio output">TEST AUDIO (diagnostic)</button>
       <span id="audio-status" role="status" aria-live="polite">Checking for the local soundtrack…</span>
     </div>
+    <div class="narration-controls">
+      <label class="narration-option"><input id="narration-enabled" type="checkbox"> Narration audition (15 seconds)</label>
+      <label for="narration-volume">Narration volume</label>
+      <input id="narration-volume" type="range" min="0" max="0.75" step="0.01" value="0.72">
+      <button id="mute-narration" type="button" aria-pressed="false">Mute narration</button>
+      <span id="narration-status" role="status" aria-live="polite">Narration is off. Enable the 15-second audition to load its local file.</span>
+    </div>
     <details id="audio-debug">
       <summary>Temporary audio diagnostics</summary>
       <pre id="audio-diagnostics" aria-live="polite">Waiting for audio diagnostics…</pre>
@@ -61,6 +68,7 @@
   <script src="src/governor.js"></script>
   <script src="src/bench.js"></script>
   <script src="src/audio.js"></script>
+  <script src="src/narration.js"></script>
   <script src="src/shaders-common.js"></script>
   <script src="src/shaders-interior.js"></script>
   <script src="src/shaders-terrace.js"></script>

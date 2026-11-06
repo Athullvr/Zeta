@@ -23,7 +23,7 @@
     if (details) console.error(title + "\n" + details);
   }
 
-  for (const k of ["util", "director", "script", "governor", "bench", "audio", "shaders", "renderer", "overlay", "film"]) {
+  for (const k of ["util", "director", "script", "governor", "bench", "audio", "narration", "shaders", "renderer", "overlay", "film"]) {
     if (!E[k]) return fail("Missing source file", `The ${k} module did not load.`, "Check that every file listed in index.html is present next to it.");
   }
 
@@ -32,6 +32,7 @@
   const opts = { reduced };
   const director = E.director.createDirector(E.film.scenes, { loop: Q.has("loop") || BENCH });
   const audioConfig = E.audio.configFromQuery(Q);
+  const narrationConfig = E.narration.configFromQuery(Q);
   const playbackDuration = E.audio.resolveDuration(audioConfig, director.duration);
   // ?act=N starts at the beginning of act N; ?t= is film time, or, with ?act, time within that act. Either way the frame is
   // a pure function of that one number.
@@ -72,7 +73,7 @@
     ].join("\n");
     if (testAudioStatus) testAudioStatus.textContent = `Diagnostic tone: ${d.testTone}`;
   }
-  let audioController = null;
+  let audioController = null, narrationController = null;
   if (controlsEnabled) {
     const audioElement = new Audio();
     audioController = E.audio.createAudioController({
@@ -81,6 +82,12 @@
       config: audioConfig,
       onStatus: status => { audioStatus.textContent = status; },
       onDiagnostics: showAudioDiagnostics,
+    });
+    narrationController = E.narration.createNarrationController({
+      audio: new Audio(),
+      config: narrationConfig,
+      onStatus: status => { const el = $("#narration-status"); if (el) el.textContent = status; },
+      onDuck: (gain, seconds) => audioController.setDuck(gain, seconds),
     });
     showAudioDiagnostics(audioController.diagnostics());
     controls.hidden = false;
@@ -133,6 +140,7 @@
     renderer.render(frame);
     overlay.update(frame, frame.post.uFade);
     if (audioController) audioController.sync(visualTime, playbackDuration);
+    if (narrationController) narrationController.sync(visualTime, { playing: !paused && !finished, silent: $("#silent-preview").checked });
     finished = !director.loop && (frame.done || visualTime >= playbackDuration);
     if (controlsEnabled) {
       if (!seeking) seekEl.value = String(Math.min(playbackDuration, visualTime));
@@ -154,6 +162,7 @@
     else {
       clock.pause(); clock.seek(playbackDuration); paused = true; finished = true;
       if (audioController) audioController.finish();
+      if (narrationController) narrationController.pause();
       updateControls();
     }
   }
@@ -161,6 +170,7 @@
     const t = Math.max(0, Math.min(playbackDuration, Number(at) || 0));
     finished = false; paused = false; perf.last = 0; governor.reset(); clock.start(t);
     if (audioController) audioController.playAt(t, { silent: $("#silent-preview").checked, duration: playbackDuration });
+    if (narrationController) narrationController.playAt(t, { silent: $("#silent-preview").checked });
     cancelAnimationFrame(rafId); draw(t); rafId = requestAnimationFrame(tick);
   }
   function restart() { startPlayback(0); }
@@ -168,6 +178,7 @@
     if (!paused) clock.pause();
     paused = true; cancelAnimationFrame(rafId);
     if (audioController) audioController.pause();
+    if (narrationController) narrationController.pause();
     draw(clock.time()); updateControls();
   }
   function resumePlayback() {
@@ -178,6 +189,7 @@
     const at = Math.max(0, Math.min(playbackDuration, Number(t) || 0));
     clock.seek(at);
     if (audioController) audioController.seek(at, playbackDuration, !paused && !finished);
+    if (narrationController) narrationController.seek(at, { playing: !paused && !finished, silent: $("#silent-preview").checked });
     draw(at);
     if (!paused && !finished && !rafId) rafId = requestAnimationFrame(tick);
   }
@@ -205,10 +217,29 @@
       mute.textContent = next ? "Unmute" : "Mute";
       audioController.setMuted(next);
     });
-    $("#silent-preview").addEventListener("change", e => audioController.setSilent(e.target.checked));
+    $("#silent-preview").addEventListener("change", e => {
+      audioController.setSilent(e.target.checked);
+      narrationController.setSilent(e.target.checked);
+    });
+    const narrationEnabled = $("#narration-enabled");
+    narrationEnabled.addEventListener("change", e => {
+      narrationController.setEnabled(e.target.checked);
+      if (e.target.checked && !paused && !finished)
+        narrationController.playAt(clock.time(), { silent: $("#silent-preview").checked });
+    });
+    $("#narration-volume").addEventListener("input", e => narrationController.setVolume(parseFloat(e.target.value)));
+    const narrationMute = $("#mute-narration");
+    narrationMute.addEventListener("click", () => {
+      const next = narrationMute.getAttribute("aria-pressed") !== "true";
+      narrationMute.setAttribute("aria-pressed", String(next));
+      narrationMute.textContent = next ? "Unmute narration" : "Mute narration";
+      narrationController.setMuted(next);
+    });
     $("#test-audio").addEventListener("click", () => { audioController.playTestTone(); });
     const audioDiagnosticsTimer = setInterval(() => showAudioDiagnostics(audioController.diagnostics()), 250);
-    addEventListener("pagehide", () => { clearInterval(audioDiagnosticsTimer); audioController.destroy(); }, { once: true });
+    addEventListener("pagehide", () => {
+      clearInterval(audioDiagnosticsTimer); audioController.destroy(); narrationController.destroy();
+    }, { once: true });
   }
 
   if (fixedT !== null) { clock.seek(fixedT); draw(); document.documentElement.dataset.ready = "1"; }
@@ -309,12 +340,21 @@
   // ---------- debugging hooks ----------
   if (Q.has("debug") || BENCH || Q.has("probe")) {
     window.__eternal = {
-      renderer, governor, director, clock, perf, layout, frameSize, audioController, playbackDuration,
+      renderer, governor, director, clock, perf, layout, frameSize, audioController, narrationController, playbackDuration,
       info: renderer.info,
       avgFps() { const d = perf.dts; return d.length ? Math.round(1000 / (d.reduce((a, b) => a + b, 0) / d.length)) : 0; },
       setScale(s) { const r = renderer.setScale(s); publishScale(); if (paused) draw(); return r; },
-      seek(t) { clock.seek(t); paused = true; cancelAnimationFrame(rafId); if (audioController) audioController.pause(); return draw(); },
-      stop() { cancelAnimationFrame(rafId); paused = true; if (audioController) audioController.pause(); },
+      seek(t) {
+        clock.seek(t); paused = true; cancelAnimationFrame(rafId);
+        if (audioController) audioController.pause();
+        if (narrationController) narrationController.pause();
+        return draw();
+      },
+      stop() {
+        cancelAnimationFrame(rafId); paused = true;
+        if (audioController) audioController.pause();
+        if (narrationController) narrationController.pause();
+      },
     };
   }
 
