@@ -149,12 +149,15 @@
       const target = Math.min(1, Math.max(0, Number(value) || 0));
       if (Math.abs(target - duckTarget) < .001) return;
       duckTarget = target;
+      const durationMs = Math.max(0, Number(seconds) || 0) * 1000;
+      if (!durationMs) {
+        if (duckTimer !== null) { clearTimeout(duckTimer); duckTimer = null; }
+        duckGain = target; applyGain(); publishDiagnostics(); return;
+      }
       // The narration envelope may move a little every film frame. Retarget an active ramp
       // without restarting it, so the music still reaches the intended level smoothly.
       if (duckTimer !== null) return;
-      const durationMs = Math.max(0, Number(seconds) || 0) * 1000;
       duckRampFrom = duckGain; duckRampStartedAt = Date.now(); duckRampDuration = durationMs;
-      if (!durationMs) { duckGain = target; applyGain(); publishDiagnostics(); return; }
       const step = () => {
         const progress = Math.min(1, (Date.now() - duckRampStartedAt) / duckRampDuration);
         duckGain = duckRampFrom + (duckTarget - duckRampFrom) * progress;

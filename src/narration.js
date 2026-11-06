@@ -89,7 +89,7 @@
     };
     const inPassage = t => t >= cfg.filmStartSeconds && t < cfg.filmStartSeconds + cfg.durationSeconds;
     const playable = () => enabled && intent && !silent && !failed && !blocked && inPassage(filmTime);
-    const setDuck = gain => onDuck(Math.min(1, Math.max(0, gain)), cfg.duckRampSeconds);
+    const setDuck = (gain, seconds = cfg.duckRampSeconds) => onDuck(Math.min(1, Math.max(0, gain)), seconds);
     function applyVolume() {
       try { audio.volume = failed || silent || muted || !enabled ? 0 : volume; } catch {}
     }

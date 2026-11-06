@@ -59,7 +59,7 @@ test("a separate narration element joins, seeks, pauses, and resumes on the film
   assert.equal(duck.at(-1).gain, controller.config.duckGain);
 
   controller.sync(11.5, { playing: true }); await flush();
-  assert.equal(audio.currentTime, 1.3);
+  assert.ok(Math.abs(audio.currentTime - 1.3) < .001);
   controller.seek(18.2, { playing: true }); await flush();
   assert.equal(audio.currentTime, 8, "seeking uses film time minus the audition start");
   controller.pause();

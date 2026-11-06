@@ -128,6 +128,27 @@ test("silent preview, volume and mute controls do not duplicate soundtrack playb
   assert.equal(audio.paused, true);
 });
 
+test("optional narration ducking changes music volume with a smooth native-element ramp", async () => {
+  const audio = new FakeAudio();
+  const controller = A.createAudioController({ audio, AudioCtor: FakeAudio, config: { fadeInSeconds: 0, volume: .72 } });
+  controller.playAt(2, { duration: 20 }); await flush();
+  assert.equal(audio.volume, .72, "soundtrack-only gain is unchanged before narration asks to duck");
+
+  controller.setDuck(.18, .1);
+  assert.ok(Math.abs(audio.volume - .72) < .001, "the duck does not step abruptly to its target");
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.ok(audio.volume < .72 && audio.volume > .72 * .18, `intermediate ramp volume ${audio.volume}`);
+  await new Promise(resolve => setTimeout(resolve, 110));
+  assert.ok(Math.abs(audio.volume - (.72 * .18)) < .01, `ducked volume ${audio.volume}`);
+
+  controller.setDuck(1, .1);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.ok(audio.volume > .72 * .18 && audio.volume < .72, `restoring volume ${audio.volume}`);
+  await new Promise(resolve => setTimeout(resolve, 110));
+  assert.ok(Math.abs(audio.volume - .72) < .01, `restored volume ${audio.volume}`);
+  controller.destroy();
+});
+
 test("the diagnostic tone is created only on request, reuses one media element and restores the score", async () => {
   FakeAudio.instances = [];
   const audio = new FakeAudio();

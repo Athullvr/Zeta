@@ -426,6 +426,61 @@ await check("a generated WAV and diagnostic tone use native media output through
   note(`WAV verified: start offset .4s, film/audio drift <.35s; fade/mute/silent controls passed; duration ${before.duration}s.`);
 });
 
+await check("optional local narration follows the film clock, ducks music in speech, and restores it during the pause", async () => {
+  const auditionToneUrl = `tests/shots/${TONE_PATH.split(/[\\/]/).pop()}`;
+  await page.goto(`${INDEX}?debug=1&audio=${encodeURIComponent(auditionToneUrl)}&fadein=0&fadeout=0&narration=${encodeURIComponent(auditionToneUrl)}&narrationStart=0`);
+  await page.waitFor("document.documentElement.dataset.ready === '1'");
+  const untouched = await page.eval("JSON.stringify({ enabled: __eternal.narrationController.enabled, loaded: __eternal.narrationController.audio.src })").then(JSON.parse);
+  assert.equal(untouched.enabled, false, "narration is opt-in");
+  assert.equal(untouched.loaded, "", "the optional voice file is not loaded while disabled");
+
+  await page.click("#play-film");
+  await page.click("#narration-enabled");
+  await page.waitFor("__eternal.narrationController.isPlaying", 10000);
+  await sleep(350);
+  const speaking = await page.eval(`JSON.stringify({ t: __eternal.clock.time(), voice: __eternal.narrationController.audio.currentTime,
+    music: __eternal.audioController.audio.volume, duck: __eternal.audioController.duckFactor, rate: __eternal.narrationController.audio.playbackRate,
+    enabled: __eternal.narrationController.enabled, status: __eternal.narrationController.status, start: __eternal.narrationController.config.filmStartSeconds,
+    windows: __eternal.narrationController.config.speechWindows, targetDuck: __eternal.narrationController.diagnostics().duckFactor })`).then(JSON.parse);
+  note(`narration diagnostics: ${JSON.stringify(speaking)}`);
+  assert.ok(Math.abs(speaking.voice - speaking.t) < .3, `voice time ${speaking.voice} vs film ${speaking.t}`);
+  assert.ok(speaking.music < .2 && speaking.duck <= .2, `music should duck during speech: ${JSON.stringify(speaking)}`);
+  assert.equal(speaking.rate, 1, "narration keeps native playback speed");
+
+  await page.eval("(() => { const s = document.getElementById('film-seek'); s.value = '6.45'; s.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  await sleep(120);
+  const pauseWindow = await page.eval(`JSON.stringify({ t: __eternal.clock.time(), voice: __eternal.narrationController.audio.currentTime,
+    music: __eternal.audioController.audio.volume, duck: __eternal.audioController.duckFactor })`).then(JSON.parse);
+  assert.ok(pauseWindow.t >= 6.45 && pauseWindow.t < 6.65, `film advanced outside the speech pause: ${pauseWindow.t}`);
+  assert.ok(Math.abs(pauseWindow.voice - pauseWindow.t) < .1, `narration seek ${pauseWindow.voice} vs film ${pauseWindow.t}`);
+  assert.ok(pauseWindow.music > .35 && pauseWindow.duck > .5, `music should rise during the spoken pause: ${JSON.stringify(pauseWindow)}`);
+
+  await page.eval("(() => { const s = document.getElementById('film-seek'); s.value = '7.2'; s.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  const resumedSpeech = await page.eval(`JSON.stringify({ t: __eternal.clock.time(), voice: __eternal.narrationController.audio.currentTime,
+    music: __eternal.audioController.audio.volume, duck: __eternal.audioController.duckFactor,
+    voiceDuck: __eternal.narrationController.diagnostics().duckFactor })`).then(JSON.parse);
+  note(`next speech diagnostics: ${JSON.stringify(resumedSpeech)}`);
+  assert.ok(Math.abs(resumedSpeech.voice - 7.2) < .1);
+  assert.ok(resumedSpeech.music < .2 && resumedSpeech.duck <= .2, "music ducks again for the next phrase");
+
+  await page.click("#pause-film");
+  assert.equal(await page.eval("__eternal.narrationController.audio.paused"), true);
+  await page.click("#resume-film");
+  await page.waitFor("__eternal.narrationController.isPlaying", 10000);
+  await page.click("#mute-narration");
+  assert.equal(await page.eval("__eternal.narrationController.audio.volume"), 0);
+  await page.click("#mute-narration");
+  await page.eval("(() => { const v = document.getElementById('narration-volume'); v.value = '0.5'; v.dispatchEvent(new Event('input', { bubbles: true })); })()");
+  assert.equal(await page.eval("__eternal.narrationController.audio.volume"), .5);
+  await page.click("#silent-preview");
+  assert.equal(await page.eval("__eternal.narrationController.audio.paused"), true);
+  await page.click("#silent-preview");
+  await page.click("#narration-enabled");
+  await sleep(300);
+  assert.ok(await page.eval("__eternal.audioController.duckFactor > .9"), "disabling narration restores normal score volume");
+  note("local WAV narration aligns to film time; voice mute/volume, pause/resume, silent mode, music duck and pause recovery passed.");
+});
+
 await page.close();
 
 // ---------------------------------------------------------------- 6. no WebGL2
